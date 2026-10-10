@@ -136,12 +136,25 @@ def test_a_persuasion_offer_is_recorded_as_an_agent_offer():
 
 
 def test_an_agent_offer_is_only_one_of_the_brief_offers():
-    v = call_vars("PUB-07")                                                  # early band: one attempt, no deadline offer
-    for date in ("2026-11-02", "2026-10-27", "2026-10-20"):
-        out, why = send(call_vars("PUB-07"), "p1", 540.0, date, "agent_offer")
-        assert out["product_id"] == "" and "never offered" in why
-    today = CASES["PUB-07"]["variables"]["now"][:10]                       # rule 28: "Can you make this payment today?"
-    assert send(v, "p1", 540.0, today, "agent_offer")[0]["product_id"] == "p1"
+    """The brief's own proposals for PUB-07 (early band): attempt 1 on Friday 2026-10-16 (rule 30), today (rule 28)
+    and the deadline for a customer with no exact day (rule 21). Nothing else."""
+    today = CASES["PUB-07"]["variables"]["now"][:10]
+    for token in ("agent_offer", "no_exact_day"):
+        for date in ("2026-10-27", "2026-10-20", "2026-10-30"):
+            out, why = send(call_vars("PUB-07"), "p1", 540.0, date, token)
+            assert out["product_id"] == "" and "is not a date the brief has you propose" in why
+        for date in (today, "2026-10-16", "2026-11-02"):
+            assert send(call_vars("PUB-07"), "p1", 540.0, date, token)[0]["product_id"] == "p1"
+
+
+def test_pub06_this_friday_labelled_no_exact_day_is_still_recorded():
+    """fix10-a v2: the customer said 'this Friday', the model wrote no_exact_day, and the guard refused the right date.
+    Friday 2026-10-16 is PUB-06's expected date and attempt 1 of its plan, a date the brief has the agent propose."""
+    want = CASES["PUB-06"]["expected"]["promises"][0]
+    out, why = send(call_vars("PUB-06"), "p1", want["amount"], want["date"], "no_exact_day")
+    assert out["product_id"] == "p1" and why == ""
+    out, why = send(call_vars("PUB-06"), "p1", want["amount"], want["date"], want["date"])      # the right way
+    assert out["product_id"] == "p1" and why == ""
 
 
 def test_a_late_band_persuasion_offer_on_the_deadline_is_allowed():
@@ -165,7 +178,23 @@ def test_missing_helper_field_sends_nothing():
 @pytest.mark.parametrize("named", ["", "   ", "{{customer_named_date}}", "next Monday-ish", "sometime", "2026/13/45x"])
 def test_empty_placeholder_or_corrupt_helper_field_sends_nothing(named):
     out, why = send(call_vars("PUB-07"), "p1", 540.0, "2026-10-27", named)
-    assert out["product_id"] == "" and "Ask the customer which exact day" in why
+    assert out["product_id"] == "" and "call the tool again now" in why and "propose no other date" in why
+
+
+def test_a_field_problem_is_resent_without_talking_to_the_customer():
+    """The note the model gets after a blocked request: fix the field and resend; never offer another date for it."""
+    hook = snippets.post_result_code(on_success="Recorded.", on_failure="Not recorded.", guard_var="promise_guard")
+    v = call_vars("PUB-07")
+    send(v, "p1", 540.0, "2026-10-27", "")
+    note = snippets.run_post_hook(hook, {"status": "success", "status_code": 400, "data": {"ok": False}}, v)
+    text = note["data"]["what_to_do_next"]
+    assert "call the tool again now" in text and "Tell the customer what can be recorded" not in text
+    assert "[resend]" not in text and v["promise_guard"] == ""
+    v = call_vars("PUB-07")
+    send(v, "p1", 540.0, "2026-11-02", "2026-10-26")                         # a wrong date: the customer must hear 27
+    text = snippets.run_post_hook(hook, {"status": "success", "status_code": 400, "data": {"ok": False}}, v)["data"]
+    assert "must be 2026-10-27" in text["what_to_do_next"]
+    assert "Tell the customer what can be recorded" in text["what_to_do_next"]
 
 
 def test_spoken_day_and_recorded_day_must_agree():
@@ -179,11 +208,11 @@ def test_a_corrected_day_counts_by_the_last_one():
     assert send(call_vars("PUB-07"), "p1", 540.0, "2026-10-27", said)[0]["product_id"] == ""
 
 
-def test_no_exact_day_gets_only_the_deadline_from_rule_21():
+def test_no_exact_day_gets_the_deadline_from_rule_21_and_never_an_unplanned_day():
     v = call_vars("PUB-07")
     assert send(v, "p1", 540.0, v["deadline_p1"], "no_exact_day")[0]["product_id"] == "p1"
     out, why = send(call_vars("PUB-07"), "p1", 540.0, "2026-10-23", "no_exact_day")
-    assert out["product_id"] == "" and "allows only " + v["deadline_p1"] in why
+    assert out["product_id"] == "" and v["deadline_p1"] in why
 
 
 # --- the extraction witness: a day the customer never said cannot be invented -----------------------------------
@@ -211,7 +240,7 @@ def test_the_witness_blocks_a_day_the_customer_did_not_say():
 def test_the_witness_blocks_tokens_that_hide_a_spoken_day():
     """The fix4-a failure, done with a token instead: the customer said the 26th, the agent claims no exact day."""
     ok, why = witnessed("2026-10-26", "2026-11-02", "no_exact_day")
-    assert not ok and "did say an exact day, 2026-10-26" in why
+    assert not ok and "the customer said 2026-10-26" in why
     assert not witnessed("2026-10-26", "2026-11-02", "agent_offer")[0]
     assert not witnessed("2026-10-26", "2026-10-14", "agent_offer")[0]            # 'today' is only before a day is said
     assert witnessed("2026-10-26", "2026-10-16", "agent_offer")[0]                # the persuasion plan still works

@@ -175,16 +175,19 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   its prompt still offered the deadline for a holiday that came before it, in 3 runs out of 3.
   The code also enforces it: give `promise_guard_code` `"named_date_key": "customer_named_date"` and the promise tool
   `helper_fields={"customer_named_date": "Where the date comes from. Required. The last exact day the customer said
-  themselves for this product as YYYY-MM-DD (even if it is a holiday, a weekend or after the deadline, and even if you
-  then proposed another day); or agent_offer if the customer accepted a date you proposed; or no_exact_day if the
-  customer never gave an exact day."}`. The pre-hook removes that field before sending (the bank never sees it). It
-  sends nothing when the field is missing, empty or unreadable; a customer day must give exactly the date the brief
-  gives for it; agent_offer is allowed only for the product's persuasion plan dates and `agent_offers` in
-  date_params.json (e.g. ["today"] for a first "can you pay today?"); no_exact_day only for `no_exact_day` (e.g.
-  "deadline"). Set both keys from the brief ([] and "" when it has none). Add `"day_first": false` when the brief reads
-  numeric dates month first. Also add `blocks.spoken_date()` to the working node's extraction and
-  `"spoken_var": "customer_spoken_date"` to the guard: the engine's own extraction of the customer's last day then has
-  to agree with the tool call, so a day the customer never said cannot be used.
+  themselves for this product, as YYYY-MM-DD, even if it is a holiday, a weekend or after the deadline, and even if
+  you then proposed another day. A day said as 'this Friday', 'tomorrow', 'today' or 'the 26th' is an exact day: write
+  its date from the date facts. agent_offer only if the customer accepted a date you proposed without naming a day;
+  no_exact_day only if the customer never gave an exact day."}`. The pre-hook removes that field before sending (the
+  bank never sees it). It sends nothing when the field is missing, empty or unreadable, and then tells the agent to
+  fix only the field and call again at once, without a word to the customer. A customer day must give exactly the date
+  the brief gives for it. A token may carry only the brief's own proposals: the persuasion plan dates, `agent_offers`
+  (e.g. ["today"] for a first "can you pay today?") and `no_exact_day` (e.g. "deadline") from date_params.json; set
+  both keys from the brief ([] and "" when it has none). Add `"day_first": false` when the brief reads numeric dates
+  month first. Tell the agent in the working node's prompt how to fill this field, with the same words: every blocked
+  request still shows as a call of the promise tool, and a practice check counts promise calls.
+  Do NOT use `spoken_var` / `blocks.spoken_date()`: in a practice run the engine's extraction turned "the twenty
+  sixth" into 2025-05-26 and "today" into 2025-05-14 (it does not know the call's date), and every promise was blocked.
 - **The latest, most specific answer decides.** A vague answer ("next week") and an exact one ("the 26th") call for
   different rules. Once the customer gives an exact value, apply the rule for that value (for example a day that is not
   allowed, and what to offer instead); the rule for vague answers no longer applies. Say this in the prompt next to the

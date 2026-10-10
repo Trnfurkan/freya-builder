@@ -69,6 +69,7 @@ def expected_date(named, r):
 
 
 TOKENS = ("agent_offer", "no_exact_day")
+RESEND = "[resend]"   # post_result.py: a field problem; the model sends again without talking to the customer
 
 
 def _iso(x):
@@ -83,32 +84,34 @@ def _iso(x):
 
 def source_check(date, named, r, pid, witness="", spoken_required=False):
     """None when the date agrees with where it came from, else the reason. `named` is _iso() of the helper field."""
-    ask = (" Do not say it is recorded. Ask the customer which exact day they will pay, read the promise back, and after "
-           "a clear yes send it again with customer_named_date set.")
+    # A problem with the helper field itself is the model's bookkeeping, not the customer's answer: the model fixes the
+    # field and sends again at once, without a word to the customer and without a new date (a live agent that was told
+    # "tell the customer what can be recorded" moved a valid day onto the deadline).
+    resend = (" " + RESEND + " Fix only customer_named_date and call the tool again now with the same product, amount and "
+              "date. Say nothing to the customer about it and propose no other date. customer_named_date is the exact "
+              "day the customer said as YYYY-MM-DD (a day said as 'this Friday', 'tomorrow' or 'the 26th' is an exact "
+              "day: take it from the date facts), or agent_offer / no_exact_day if the date was proposed by you.")
     if not named:
-        return "the request did not say where the date " + date + " comes from (customer_named_date is empty)." + ask
+        return "customer_named_date is empty, so it is unknown where the date " + date + " comes from." + resend
     if named.startswith("?"):
-        return "customer_named_date must be YYYY-MM-DD, agent_offer or no_exact_day (got " + named[1:] + ")." + ask
+        return "customer_named_date must be YYYY-MM-DD, agent_offer or no_exact_day (got " + named[1:] + ")." + resend
     heard = witness if re.match(r"^\d{4}-\d{2}-\d{2}$", witness or "") else ""
-    plan = list(r.get("plan_dates") or [])
-    if named == "agent_offer":
-        allowed = plan if heard else plan + list(r.get("agent_dates") or [])
-        if date in allowed:
+    # Dates the brief has the agent propose itself: the persuasion plan, its own first offers (agent_offers) and the
+    # date for a customer who gives no exact day (no_exact_day). Either token may carry any of them; while a witness
+    # has heard a customer day, only the persuasion plan.
+    own = list(r.get("plan_dates") or [])
+    if not heard:
+        own += list(r.get("agent_dates") or []) + ([r["no_exact_day"]] if r.get("no_exact_day") else [])
+    if named in TOKENS:
+        if date in own:
             return None
-        return ("the agent never offered " + date + " for " + pid + " under the brief's rules (its own offers: "
-                + (", ".join(sorted(set(allowed))) or "none") + (", and the customer said " + heard if heard else "")
-                + ")." + ask)
-    if named == "no_exact_day":
-        if heard:
-            return "the customer did say an exact day, " + heard + "; use it as customer_named_date." + ask
-        if r.get("no_exact_day") and date == r.get("no_exact_day"):
-            return None
-        return ("without an exact day from the customer, the brief allows only " + (r.get("no_exact_day") or "no date")
-                + " for " + pid + ", not " + date + "." + ask)
+        return ("customer_named_date says " + named + ", but " + date + " is not a date the brief has you propose for "
+                + pid + " (" + (", ".join(sorted(set(own))) or "none") + (", and the customer said " + heard if heard
+                                                                            else "") + ")." + resend)
     if heard and heard != named:
-        return "customer_named_date " + named + " is not the day the customer said (" + heard + ")." + ask
+        return "customer_named_date " + named + " is not the day the customer said (" + heard + ")." + resend
     if not heard and spoken_required:
-        return "no exact day from the customer has been heard yet, so " + named + " cannot be used." + ask
+        return "no exact day from the customer has been heard yet, so " + named + " cannot be used." + resend
     want, why = expected_date(named, r)
     if want is None:
         return ("the customer named " + named + " and nothing can be recorded for that day for " + pid + " (" + why

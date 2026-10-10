@@ -68,8 +68,13 @@ def _apply(res, p, variables):
         if falses:
             note = "Result: " + ", ".join(k + " is FALSE" for k in falses) + ". " + (note or "")
     if blocked:
-        note = str(variables.get(guard)) + " This is not a service failure and does not count as a failed attempt. " \
-            + "Tell the customer what can be recorded instead, following your rules, and read it back before trying again."
+        reason = str(variables.get(guard))
+        if "[resend]" in reason:   # promise_guard.py RESEND: the model's own field; no customer talk, no new date
+            note = reason.replace("[resend]", "").replace("  ", " ") \
+                + " This is not a service failure and does not count as a failed attempt."
+        else:
+            note = reason + " This is not a service failure and does not count as a failed attempt. " \
+                + "Tell the customer what can be recorded instead, following your rules, and read it back before trying again."
         variables[guard] = ""
     if isinstance(variables, dict):
         for k, v in (p.get("set_on_any") or dict()).items():

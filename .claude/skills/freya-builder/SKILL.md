@@ -111,7 +111,15 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
 - **Model-called tools.** Description says exactly when to call it ("CALL it ... only after ..."). One tool per message.
   After every tool result the agent speaks or calls the next tool; it never ends a turn with nothing.
 - **Order of actions.** A tool whose result decides the outcome (a transfer, a write) is called alone and its result is
-  awaited before the closing tool. Say it in both tools' descriptions; a practice agent closed the call before the transfer.
+  awaited before the closing tool. A prompt rule was not enough: a practice agent closed as "transferred" before
+  transferring in 2 of 3 runs. So enforce it in the workflow: leave every outcome that needs an earlier tool out of the
+  closing tool's enum in the working nodes (`enums={"outcome": [...]}`), add `blocks.outcome_after(...)` with a closing
+  tool that allows only those outcomes, and route to it with `go(..., gt("<tool>_success_count", 0))` placed before the
+  other transitions.
+- **Words reserved for results.** Words the brief or its checks use for what a tool did ("recorded", "booked",
+  "confirmed", "transferred") appear only after that tool succeeded. Any other sentence the brief requires (for example
+  that the call itself is taped) says the same thing in other words. A judge failed an agent for an opening that said
+  "This call is recorded" before any promise was recorded.
 - **Retries in code, not memory.** When the brief says "try once more, then ...", count failures in the tool's post-hook
   (`vars`) and let the instruction say which attempt this was, instead of trusting the model to remember:
   `post_result_code(..., fail_count_var=..., fail_limit=..., on_failure_final=...)`. The counter counts every failed

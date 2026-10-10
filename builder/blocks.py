@@ -226,6 +226,21 @@ def wrap_up_node(name, close_tool, end_target, *, task=None, tool="close_call", 
                         transitions=[closed_transition(end_target, tool)], max_turns=max_turns, max_turn_target=end_target)
 
 
+# Outcomes that need an earlier tool ------------------------------------------------------------------------------
+# Seen in practice runs: the agent called the closing tool with "transferred" before calling the transfer tool; the call
+# was closed and the bank refused the transfer. A prompt rule did not stop it (2 of 3 runs). So the outcome is taken
+# out of the closing tool where the work happens, and offered only in a node reached after the tool succeeded.
+
+def outcome_after(name, tool, close_tool, end_target, *, task=None, max_turns=4):
+    """Node entered after `tool` succeeded, whose closing tool (built with enums={outcome: [...]}) allows only the
+    outcomes that need that tool. Pair it with go(name, ..., gt(f"{tool}_success_count", 0)) in the working node,
+    and leave those outcomes out of the working node's closing tool."""
+    task = task or (f"{tool} has succeeded. Tell the customer what happens next in one short sentence, thank them, say "
+                    "goodbye and in the same message call close_call with the outcome and reason that match it.")
+    return conversation(name, task, tools=[close_tool], on_enter=llm(task),
+                        transitions=[closed_transition(end_target)], max_turns=max_turns, max_turn_target=end_target)
+
+
 # Tool failures --------------------------------------------------------------------------------------------------
 # Seen in practice runs: when the bank answered a write with HTTP 500, the platform logged "function_call_error",
 # the tool's post-hook did not run, and the model only saw "API request failed: ...". With no instruction it apologised,

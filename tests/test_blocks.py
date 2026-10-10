@@ -171,3 +171,22 @@ def test_failure_rules_without_engine_retries_asks_for_one_silent_retry():
     assert "call it again at once with exactly the same values, without saying anything" in text
     assert 'If it fails again, say exactly: "I could not record the promise."' in text
     assert "{{" not in text
+
+
+def test_outcome_after_a_transfer_pattern_validates(openapi):
+    cid = {"customer_id": "{{customer_id}}"}
+    others = ["promise", "paid", "no_promise", "not_verified", "not_reached"]
+    close_work = ot.api_tool(openapi, "close_call", baked=cid, enums={"outcome": others}, post_hook=b.close_post_hook(snippets))
+    close_xfer = ot.api_tool(openapi, "close_call", baked=cid, enums={"outcome": ["transferred"]},
+                             post_hook=b.close_post_hook(snippets))
+    work = b.conversation("negotiate", "Talk.", tools=[ot.api_tool(openapi, "transfer_to_agent", baked=cid), close_work],
+                          transitions=[b.go("after_transfer", "transfer done", b.gt("transfer_to_agent_success_count", 0)),
+                                       b.closed_transition("end")],
+                          max_turns=40, max_turn_target="wrap_up")
+    after = b.outcome_after("after_transfer", "transfer_to_agent", close_xfer, "end")
+    wf = b.workflow("negotiate", [work, after, b.wrap_up_node("wrap_up", close_work, "end"), b.end_node("end")])
+    assert "transferred" not in work["tools"][1]["function"]["parameters"]["properties"]["body"]["properties"]["outcome"]["enum"]
+    assert after["tools"][0]["function"]["parameters"]["properties"]["body"]["properties"]["outcome"]["enum"] == ["transferred"]
+    assert after["on_enter"]["type"] == "llm" and after["max_turn_transition"] == "end"
+    rep = validate(wf, openapi)
+    assert rep.errors == [], rep.text()

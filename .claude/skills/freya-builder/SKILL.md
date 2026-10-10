@@ -149,6 +149,10 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   `builder/sandbox/date_facts.py`). Each product then gets its own plan in `product_facts`, with exactly as many
   attempts as its band allows. Tell the agent to follow each product's plan step by step. Practice agents made a second
   offer on a product whose band allowed one.
+- **Several products: one lookup line per day.** With more than one product, `product_facts` holds a day-by-day
+  table saying what each product gets for each date. Tell the agent to find the named date's line and do exactly what it
+  says for every product. With the rule in the prompt alone, a practice agent moved a card whose date was allowed onto
+  its later deadline ("the latest date I can record is ...") in 2 runs out of 4.
 - **Named days are looked up, not reasoned about.** The date facts hold, per band, a table of the days that cannot be
   recorded and what to offer instead (`non_business_day` and `after_deadline` in `date_params.json`, from the brief).
   Tell the agent to look a named day up there and say exactly what it says. A practice agent that had the right rule in

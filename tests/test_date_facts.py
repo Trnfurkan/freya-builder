@@ -167,3 +167,30 @@ def test_no_plan_without_offers(params_a):
     v = facts(params_a, "2026-10-14T11:00", PUB12[:1])
     assert "offer_plan_p1" not in v and "persuasion plan" not in v["product_facts"]
     assert not v["product_facts"].startswith("Several products")
+
+
+PUB13 = [{"product_id": "p1", "type": "credit_card", "card_last4": "6604", "past_due": 300.0, "days_late": 4, "minimum_payment": 90.0},
+         {"product_id": "p2", "type": "personal_loan", "past_due": 900.0, "days_late": 20, "instalment_amount": 300.0}]
+
+
+def test_date_lookup_for_several_products(params_a):
+    # PUB-13: one date for both; the card keeps it, the loan moves to its own deadline.
+    v = facts(params_a, "2026-10-14T11:00", PUB13)
+    rows = {r.split(" -> ")[0]: r.split(" -> ")[1] for r in v["date_lookup"].splitlines()}
+    assert rows["Friday 2026-10-30"] == ("p1: record Friday 2026-10-30; p2: after its deadline, record Friday 2026-10-23 "
+                                         "(its latest date) and say so")
+    assert rows["Monday 2026-10-26"].startswith("p1: holiday, offer Tuesday 2026-10-27; p2: after its deadline")
+    assert rows["Wednesday 2026-10-21"] == "p1: record Wednesday 2026-10-21; p2: record Wednesday 2026-10-21"
+    assert rows["any later day"].startswith("p1: after its deadline, record Monday 2026-11-02")
+    assert "find that date's line" in v["product_facts"] and "Friday 2026-10-30 -> p1: record" in v["product_facts"]
+
+
+def test_date_lookup_follows_the_brief_choices(params_a):
+    v = facts({**params_a, "non_business_day": "previous", "after_deadline": ""}, "2026-10-14T11:00", PUB13)
+    rows = {r.split(" -> ")[0]: r.split(" -> ")[1] for r in v["date_lookup"].splitlines()}
+    assert rows["Monday 2026-10-26"] == "p1: holiday, offer Friday 2026-10-23; p2: after its deadline, cannot be recorded"
+
+
+def test_no_date_lookup_for_one_product(params_a):
+    v = facts(params_a, "2026-10-14T11:00", PUB13[:1])
+    assert "date_lookup" not in v and "Date lookup" not in v["product_facts"]

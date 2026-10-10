@@ -125,6 +125,43 @@ def _offer_amount(token, full, floor):
     return _money(full)
 
 
+def _verdict(day, today, deadline, p):
+    """What to record for one product when the customer names `day`, by the brief's choices."""
+    if day < today:
+        return "before today, cannot be recorded"
+    if day > deadline:
+        if p.get("after_deadline", "deadline") == "deadline":
+            return "after its deadline, record " + _label(deadline) + " (its latest date) and say so"
+        return "after its deadline, cannot be recorded"
+    if _is_business(day, p):
+        return "record " + _label(day)
+    kind = "holiday" if day.isoformat() in p.get("holidays", []) else "weekend"
+    move = p.get("non_business_day", "next")
+    target = None
+    if move == "next":
+        target = _next_business(day, p)
+    elif move == "previous":
+        target = _prev_business(day, p)
+        if target < today:
+            target = _next_business(day, p)
+    if target is not None and target <= deadline:
+        return kind + ", offer " + _label(target)
+    return kind + ", cannot be recorded"
+
+
+def _lookup(today, items, p):
+    """Day by day, what each product gets when the customer names that day. Practice agents compared dates wrongly
+    with several products (an allowed date moved onto a later deadline), so they look the day up instead."""
+    last = max(dl for _, dl in items)
+    rows, d = [], today
+    while d <= last + datetime.timedelta(days=7):
+        rows.append(_label(d) + " -> " + "; ".join(pid + ": " + _verdict(d, today, dl, p) for pid, dl in items))
+        d = d + datetime.timedelta(days=1)
+    rows.append("any later day -> " + "; ".join(pid + ": " + _verdict(last + datetime.timedelta(days=30), today, dl, p)
+                                                 for pid, dl in items))
+    return rows
+
+
 def _plan(pid, attempts, offers, today, deadline, full, floor, p):
     """The persuasion attempts for one product, worked out in full. Practice agents counted attempts wrongly per
     product (two offers where the band allowed one), so the agent reads the plan instead of counting."""
@@ -259,6 +296,7 @@ def _main(vars, p):
     floors = p.get("floor_field_by_type") or dict()
     plines = []
     plan_lines = []
+    lookup_items = []
     rules = dict()
     for i, prod in enumerate(products):
         pid = str(prod.get(f.get("id", "product_id"), "p" + str(i + 1)))
@@ -281,6 +319,7 @@ def _main(vars, p):
             text += (". Band " + str(b["name"]) + ", deadline " + _label(dl) + ", persuasion attempts " + str(b.get("attempts", ""))
                      + ". For a day the customer names, use band " + str(b["name"]) + "'s table")
             vars["deadline_" + pid] = dl.isoformat()
+            lookup_items.append((pid, dl))
             rules[pid] = dict(dates=[x.isoformat() for x in _business_days_until(today, dl, p, 400)], deadline=dl.isoformat(),
                               floor=_num(floor), full=_num(amount))
             plan = _plan(pid, b.get("attempts"), p.get("attempt_offers"), today, dl, amount, floor, p)
@@ -294,6 +333,12 @@ def _main(vars, p):
         plan_lines = []
     vars["product_count"] = str(len(products))
     vars["promise_rules"] = json.dumps(rules)
+    if len(lookup_items) > 1:
+        rows = _lookup(today, lookup_items, p)
+        vars["date_lookup"] = "\n".join(rows)
+        plines.append("Date lookup for several products. When the customer names a date, find that date's line and do "
+                      "exactly what it says for each product; never compare dates yourself:")
+        plines.extend("  " + r for r in rows)
     if len(products) > 1:
         plines.insert(0, "Several products: when the customer names one date for several of them, check that date for each "
                          "product on its own, with that product's band (allowed dates, deadline, table). A product whose "

@@ -145,10 +145,12 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
 - **Tool failures.** When the bank answers with an HTTP error, the platform reports a `function_call_error`: the tool's
   post-hook does not run, so nothing in `post_result_code` reaches the model. In practice runs the agent then apologised
   for "a technical error", said goodbye and closed, every time, though the brief allowed another try. So:
-  - If `openapi_tools.repeatable_on_failure(spec, tool)` is true (the tool API file says a failed call records nothing
-    and may be repeated) and the brief allows N more tries, give the tool `max_retries=N`: the engine repeats it.
-  - Put `blocks.failure_rules(tool, <the brief's sentence for a final failure>, engine_retries=N, then=<what the brief
-    says next>)` into the tool's description and into the node's prompt.
+  - Do not count on the engine to retry: a practice build with `max_retries=1` on the promise tool still made only one
+    call after an HTTP 500. The model must retry: put `blocks.failure_rules(tool, <the brief's sentence for a final
+    failure>, then=<what the brief says next>)` (engine_retries left at 0) into the tool's description and into the
+    node's prompt. That build passed the tool-failure customer on its next run.
+  - Retry only when `openapi_tools.repeatable_on_failure(spec, tool)` is true (the tool API file says a failed call
+    records nothing and may be repeated); otherwise follow only what the brief says.
   - The customer never hears about errors, retries or systems; on a final failure only the brief's own sentence, said
     once and calmly, then the brief's next step. Never close the call because of a failure the brief lets you retry.
   - The post-hook instructions still matter for answers that come back normally with `ok` false.

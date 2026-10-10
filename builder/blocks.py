@@ -230,8 +230,8 @@ def wrap_up_node(name, close_tool, end_target, *, task=None, tool="close_call", 
 # Seen in practice runs: when the bank answered a write with HTTP 500, the platform logged "function_call_error",
 # the tool's post-hook did not run, and the model only saw "API request failed: ...". With no instruction it apologised,
 # said goodbye and closed, in every run, although the brief allowed one more try. So the failure rules must be in the
-# tool description and the prompt (always visible), and the retry itself is best left to the engine (maxRetries) when
-# the tool API file says a failed call records nothing and may be repeated.
+# tool description and the prompt (always visible). The engine's maxRetries did not repeat a call after an HTTP 500 in a
+# later practice build, so the model does the retry (engine_retries=0, the default); that build then passed.
 
 def failure_rules(tool, final_line, *, engine_retries=0, then=""):
     """Text for the tool description and the prompt: what a failed call means and what to say.

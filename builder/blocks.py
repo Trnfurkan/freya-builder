@@ -241,6 +241,44 @@ def outcome_after(name, tool, close_tool, end_target, *, task=None, max_turns=4)
                         transitions=[closed_transition(end_target)], max_turns=max_turns, max_turn_target=end_target)
 
 
+# Payment requests through one gate ------------------------------------------------------------------------------
+# Seen in a practice run: inside one conversation node the agent added an unplanned "can you pay the full amount?"
+# before each product's first attempt, so a product allowed one request got two. A count kept in the model's head can
+# not be enforced. So requests are made only by a node that says vars["offer_line"] word for word, and that node can
+# only be entered from the offer gate code node, which counts the request when it prepares the line.
+
+OFFER_LINE = "{{offer_line}}"
+
+
+def offer_loop(gate_name, say_name, back_node, gate_code, *, reply_var="offer_reply", max_turns=3):
+    """[gate node, request node]. The working node reaches the gate with to_gate(gate_name); the gate either prepares
+    the next allowed request or, when none is allowed, goes back with vars["offer_state"] == "done"."""
+    gate = code_node(gate_name, gate_code, say_name,
+                     transitions=[go(back_node, "no payment request is allowed now", eq("offer_state", "done"))])
+    task = ("You have just made the payment request above. Do not make any other request or offer, do not name any other "
+            "amount or date, and call no tool. If the customer asks a question, answer it in one short sentence and then "
+            "repeat the request word for word.")
+    request = conversation(
+        say_name, task, on_enter=say(OFFER_LINE),
+        extraction=[extract(reply_var, "string",
+                            "The customer's answer to the payment request just made: accepted (agrees to exactly that "
+                            "amount and date), refused (says no without proposing anything), other (proposes their own "
+                            "date or amount, says the amount is too much, asks to stop, mentions illness, job loss, a "
+                            "death, a dispute, a payment already made, a new plan or a human, or anything else).",
+                            enum=["accepted", "refused", "other"], min_confidence=0.6)],
+        transitions=[go(back_node, "the customer accepted the request", eq(reply_var, "accepted")),
+                     go(gate_name, "the customer refused: the gate decides the next request, if any", eq(reply_var, "refused")),
+                     go(back_node, "the customer said something else", eq(reply_var, "other"))],
+        max_turns=max_turns, max_turn_target=back_node)
+    return [gate, request]
+
+
+def to_gate(gate_name, when="The customer refused to pay (no date, no amount) and a persuasion attempt may follow."):
+    """Tool-call transition from the working node to the offer gate: the agent never words a request itself."""
+    return {"target_node": gate_name, "description": when, "is_tool_call": True,
+            "condition": {"operator": "matches_intent", "description": when}}
+
+
 # Tool failures --------------------------------------------------------------------------------------------------
 # Seen in practice runs: when the bank answered a write with HTTP 500, the platform logged "function_call_error",
 # the tool's post-hook did not run, and the model only saw "API request failed: ...". With no instruction it apologised,

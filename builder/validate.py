@@ -159,6 +159,57 @@ def _written_vars(code):
     return names, prefixes
 
 
+GATE_MARK = "# offer_gate:"
+MARK_MARK = "# mark_product:"
+
+
+def _codes(node):
+    """Every code string a node carries: code_exec defaults and tool hooks."""
+    out = []
+    for t in (node.get("pre_actions") or []) + (node.get("tools") or []):
+        out.append(t.get("function", {}).get("parameters", {}).get("properties", {}).get("code", {}).get("default", "") or "")
+        out.append(t.get("pre_process_code", "") or "")
+        out.append(t.get("post_process_code", "") or "")
+    return [c for c in out if c]
+
+
+def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
+    """Payment requests must pass the offer gate (builder/blocks.offer_loop). Every path into a node that says
+    {{offer_line}} must come from a gate code node; nothing else may say the line, return into it with __previous__,
+    or write the request ledger."""
+    nodes, globals_ = wf.get("nodes") or {}, wf.get("global_nodes") or {}
+    every = [(k, n, False) for k, n in nodes.items()] + [(k, n, True) for k, n in globals_.items()]
+    line = "{{offer_line}}"
+    say_nodes = {k for k, n, _ in every if line in str((n.get("on_enter") or {}).get("text", ""))}
+    gates = {k for k, n, _ in every if any(GATE_MARK in c for c in _codes(n))}
+    if not say_nodes and not gates:
+        return
+    if not gates:
+        rep.error("workflow", "a node says {{offer_line}} but no offer gate code node exists")
+    for k, n, is_global in every:
+        where = ("global_nodes." if is_global else "nodes.") + k
+        texts = [n.get(f, "") for f in ("task_message", "loop_prompt", "role_message", "routing_prompt")]
+        if k not in say_nodes:
+            texts.append(str((n.get("on_enter") or {}).get("text", "")))
+        if any(line in (t or "") for t in texts):
+            rep.error(where, "uses {{offer_line}} outside the request node: a request could be made without the gate")
+        targets = [t.get("target_node") for t in n.get("transitions") or []]
+        targets += [n.get("passthrough_default_transition"), n.get("max_turn_transition")]
+        for s_node in say_nodes & set(targets):
+            if k not in gates:
+                rep.error(where, f"leads into request node {s_node!r} without passing the offer gate")
+        if is_global and "__previous__" in targets:
+            missing = say_nodes - set(n.get("excluded_nodes") or [])
+            if missing:
+                rep.error(where, f"returns with __previous__ and may re-enter {sorted(missing)}, repeating a request "
+                                 "without counting it; add them to excluded_nodes")
+        for c in _codes(n):
+            if ledger_var in c and GATE_MARK not in c and MARK_MARK not in c:
+                rep.error(where, f"code writes or reads {ledger_var!r} outside the offer gate and mark hooks")
+    if wf.get("initial_node") in say_nodes:
+        rep.error("workflow", "the call starts in a request node, before the offer gate")
+
+
 def validate(wf, spec=None, call_vars=None):
     rep = Report()
     if not isinstance(wf, dict):
@@ -308,6 +359,8 @@ def validate(wf, spec=None, call_vars=None):
         todo += [n.get("passthrough_default_transition"), n.get("max_turn_transition")]
     for k in set(nodes) - seen:
         rep.warn("nodes." + k, "not reachable from initial_node")
+
+    check_offer_gate(wf, rep)
 
     if spec is not None:
         used = set()

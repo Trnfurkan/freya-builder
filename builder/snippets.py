@@ -45,6 +45,25 @@ def promise_guard_code(params):
     return build("promise_guard", params)
 
 
+def offer_gate_code(params):
+    """Code for the offer gate node: the one place that decides and counts payment requests (sandbox/offer_gate.py)."""
+    return build("offer_gate", params)
+
+
+def mark_product_code(params):
+    """pre_process_code that marks a product as settled in the offer ledger (sandbox/mark_product.py)."""
+    return build("mark_product", params)
+
+
+def chain(*codes):
+    """Several hook snippets run one after another in one pre_process_code (a tool has only one).
+    Each snippet sets its own PARAMS first, so they do not interfere."""
+    code = "\n".join(c for c in codes if c)
+    assert "{{" not in code and "}}" not in code
+    compile(code, "chain", "exec")
+    return code
+
+
 # Local runners: execute a snippet the way the platform does, for tests and for checking facts.
 
 def run_code_node(code, variables):

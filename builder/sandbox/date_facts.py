@@ -178,6 +178,20 @@ def _plan(pid, attempts, offers, today, deadline, full, floor, p):
             + pid + ".")
 
 
+def _plan_steps(attempts, offers, today, deadline, full, floor, p):
+    """The same plan as data, for the offer gate (builder/sandbox/offer_gate.py): one entry per allowed attempt."""
+    n = int(attempts or 0)
+    out = []
+    for o in (offers or [])[:max(n, 0)]:
+        d = _offer_date(o.get("date", "deadline"), today, deadline, p)
+        token = o.get("amount", "full")
+        amount = floor if token == "floor" and floor is not None else full
+        alt = floor if token == "full_or_floor" and floor is not None else None
+        out.append(dict(amount=_money(amount), alt_amount=_money(alt) if alt is not None else "", date=d.isoformat(),
+                        date_label=_label(d)))
+    return out
+
+
 def _band(days_late, p):
     for b in p.get("bands", []):
         if int(b["min_days_late"]) <= int(days_late) <= int(b["max_days_late"]):
@@ -297,6 +311,9 @@ def _main(vars, p):
     plines = []
     plan_lines = []
     lookup_items = []
+    plans = dict()
+    order = []
+    labels = dict()
     rules = dict()
     for i, prod in enumerate(products):
         pid = str(prod.get(f.get("id", "product_id"), "p" + str(i + 1)))
@@ -323,6 +340,9 @@ def _main(vars, p):
             rules[pid] = dict(dates=[x.isoformat() for x in _business_days_until(today, dl, p, 400)], deadline=dl.isoformat(),
                               floor=_num(floor), full=_num(amount))
             plan = _plan(pid, b.get("attempts"), p.get("attempt_offers"), today, dl, amount, floor, p)
+            plans[pid] = _plan_steps(b.get("attempts"), p.get("attempt_offers"), today, dl, amount, floor, p)
+            order.append(pid)
+            labels[pid] = dict((k, str(v)) for k, v in prod.items())
             if plan:
                 vars["offer_plan_" + pid] = plan
                 plan_lines.append("  " + plan)
@@ -333,6 +353,7 @@ def _main(vars, p):
         plan_lines = []
     vars["product_count"] = str(len(products))
     vars["promise_rules"] = json.dumps(rules)
+    vars["offer_plans"] = json.dumps(dict(order=order, plans=plans, products=labels))
     if len(lookup_items) > 1:
         rows = _lookup(today, lookup_items, p)
         vars["date_lookup"] = "\n".join(rows)

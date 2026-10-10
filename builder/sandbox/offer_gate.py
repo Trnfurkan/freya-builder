@@ -1,0 +1,99 @@
+# offer_gate: the one place that decides whether a payment request may be put to the customer.
+# Runs in a passthrough code node; the node after it says vars["offer_line"] word for word (on_enter tts), so every
+# request the customer hears was counted here first. The builder prepends one line `PARAMS = json.loads(...)`.
+# Rules for this file: only json, re and datetime; never raise; no double braces; read and write through vars.
+#
+# Why: practice agents asked for payment more often than the brief allowed (an extra "can you pay the full amount?"
+# before each product's first attempt) because the count lived only in the model's head.
+#
+# State, in vars[ledger_var] as JSON, only ever written here (and product states by mark hooks):
+#   counts  {product_id: requests put to the customer}   never decreases, never reset by any route
+#   state   {product_id: "open" | "agreed" | "refused" | <set by a mark hook, e.g. "promise_requested", "noted">}
+#   current product_id of the last request, or ""
+# Inputs: vars[plans_var] (written by date_facts.py: order, plans, products), vars[reply_var] (extracted answer to
+# the last request: accepted, refused or other; cleared here once read), vars[alt_flag_var] ("yes" when the customer
+# said the full amount is too much).
+# Outputs: vars["offer_state"] = "offer" (offer_line is ready) | "done" (no request is allowed now),
+#          vars["offer_line"], vars["offer_product"], vars["offer_summary"].
+#
+# PARAMS keys:
+#   ledger_var, plans_var, reply_var, alt_flag_var   variable names (defaults below)
+#   line_template      e.g. "For your {product}, could you pay {amount} on {date}?" (placeholders: product, amount, date)
+#   product_labels     {product type: label template from the product's fields, e.g. "credit card ending {card_last4}"}
+import json
+
+
+def _load(raw, default):
+    if isinstance(raw, dict):
+        return raw
+    try:
+        out = json.loads(raw) if raw else None
+        return out if isinstance(out, dict) else default
+    except Exception:
+        return default
+
+
+def _fill(template, values):
+    out = str(template)
+    for k, v in values.items():
+        out = out.replace("{" + str(k) + "}", str(v))
+    return out
+
+
+def decide(vars, p):
+    lv = p.get("ledger_var") or "offer_ledger"
+    ledger = _load(vars.get(lv), dict(counts=dict(), state=dict(), current=""))
+    counts = ledger.setdefault("counts", dict())
+    state = ledger.setdefault("state", dict())
+    plans_all = _load(vars.get(p.get("plans_var") or "offer_plans"), dict(order=[], plans=dict(), products=dict()))
+    order = plans_all.get("order") or []
+    plans = plans_all.get("plans") or dict()
+    products = plans_all.get("products") or dict()
+
+    rv = p.get("reply_var") or "offer_reply"
+    reply = str(vars.get(rv) or "").strip().lower()
+    vars[rv] = ""                                   # a stale answer must never decide the next request
+    cur = ledger.get("current") or ""
+    if cur and reply == "accepted":
+        state[cur] = "agreed"
+    elif cur and reply == "refused" and int(counts.get(cur, 0)) >= len(plans.get(cur) or []):
+        state[cur] = "refused"
+
+    pick = ""
+    for pid in order:
+        if state.get(pid, "open") != "open":
+            continue
+        if int(counts.get(pid, 0)) < len(plans.get(pid) or []):
+            pick = pid
+            break
+    if pick:
+        n = int(counts.get(pick, 0))
+        step = plans[pick][n]
+        counts[pick] = n + 1                        # counted now: the next node says this line word for word
+        amount = step.get("amount", "")
+        if step.get("alt_amount") and str(vars.get(p.get("alt_flag_var") or "full_too_much") or "").lower() == "yes":
+            amount = step.get("alt_amount")
+        prod = products.get(pick) or dict()
+        label_t = (p.get("product_labels") or dict()).get(prod.get("type", ""), "") or str(prod.get("type", pick)).replace("_", " ")
+        line_t = p.get("line_template") or "For your {product}, could you pay {amount} on {date}?"
+        vars["offer_line"] = _fill(line_t, dict(product=_fill(label_t, prod), amount=amount, date=step.get("date_label", "")))
+        vars["offer_product"] = pick
+        vars["offer_state"] = "offer"
+        ledger["current"] = pick
+    else:
+        used = [pid for pid in order if int(counts.get(pid, 0)) >= len(plans.get(pid) or []) and state.get(pid, "open") in ("open", "refused")]
+        vars["offer_line"] = ""
+        vars["offer_product"] = ""
+        vars["offer_state"] = "done"
+        vars["offer_summary"] = ("No payment request is allowed now. All persuasion attempts are used for: "
+                                 + (", ".join(used) if used else "none") + ". Make no further request for those products.")
+        ledger["current"] = ""
+    vars[lv] = json.dumps(ledger)
+
+
+try:
+    decide(vars, PARAMS)
+except Exception as _e:
+    vars["offer_state"] = "done"                    # on any doubt, ask for nothing
+    vars["offer_line"] = ""
+    vars["offer_summary"] = "No payment request is allowed now (offer gate error: " + str(_e) + ")."

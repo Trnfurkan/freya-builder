@@ -12,6 +12,8 @@
 #   product_key, date_key, amount_key   body keys of the promise request
 #   check_dates, check_amount           booleans, from what the brief says
 #   guard_var                           variable for the reason (default "promise_guard")
+#   max_attempts                        requests per product that may reach the bank, retries included (0 = no limit);
+#                                       counted in vars["promise_attempts"], a blocked request is not counted
 import json
 
 
@@ -63,6 +65,18 @@ try:
     vars[_gv] = ""
     if isinstance(_b, dict):
         _why = check(_b, _rules(vars), PARAMS)
+        _pid = str(_b.get(PARAMS.get("product_key") or "product_id") or "")
+        _max = int(PARAMS.get("max_attempts") or 0)
+        try:
+            _att = json.loads(vars.get("promise_attempts") or "{}") if not isinstance(vars.get("promise_attempts"), dict) else vars.get("promise_attempts")
+        except Exception:
+            _att = dict()
+        if not _why and _max and int(_att.get(_pid, 0)) >= _max:
+            _why = ("the bank was already asked " + str(_att.get(_pid)) + " time(s) for " + _pid
+                    + ", the most allowed. Do not try again; follow your rule for a promise that could not be recorded.")
+        if not _why and _max:
+            _att[_pid] = int(_att.get(_pid, 0)) + 1
+            vars["promise_attempts"] = json.dumps(_att)
         if _why:
             vars[_gv] = "NOT RECORDED, blocked before sending: " + _why
             _b[PARAMS.get("product_key") or "product_id"] = ""

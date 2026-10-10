@@ -42,7 +42,9 @@ brief files and the tool API file. Never use a value, name, phrase or rule from 
 3. **Date and amount facts.** If the brief has business days, holidays, deadlines or bands, write `out/<slot>/date_params.json`
    for `builder/sandbox/date_facts.py` (keys at the top of that file; field names from the tool API file). Check it:
    `PY -m builder.facts out/<slot>/date_params.json --now <a current time in the brief's format>` and compare with every
-   worked example the brief gives. If a calendar rule does not fit those parameters, write your own code node snippet in the
+   worked example the brief gives. Then `PY -m builder.policy out/<slot>/date_params.json`: every ERROR (a missing
+   limit, overlapping bands, more attempts than defined offers) must be fixed from the brief before you go on; if the
+   brief itself is unclear, write the safe choice in rules.md. If a calendar rule does not fit those parameters, write your own code node snippet in the
    same style (json, re, datetime only; never raise; no double braces; read and write through `vars`) and test it locally
    with `builder.snippets.run_code_node`.
 
@@ -144,6 +146,18 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   a cut-off or partial answer is not a new refusal: wait for the rest instead of asking again. When attempts are counted
   per item (per product, per question), the prompt shows a separate counter for each item with its own limit taken from
   the facts ("attempts used on p3: 0 of 1"), and the agent moves to the next item when an item's limit is reached.
+- **Payment requests only through the offer gate.** When the brief limits how often the customer may be asked to pay
+  (attempts per product or band, "offer once"), the agent must not word requests itself. Build `blocks.offer_loop(
+  "offer_gate", "offer_request", <working node>, snippets.offer_gate_code({...}))` and put `blocks.to_gate("offer_gate")`
+  in the working node's transitions. The gate counts each request per product in `vars` (never reset by any route) and
+  prepares the next allowed one from the plan; the request node says it word for word and the customer's answer routes
+  back. The working node's prompt says: never propose an amount or date as a payment request yourself; after a refusal
+  use the transition to the gate. Give the promise tool `snippets.chain(promise_guard_code({..., "max_attempts": <1 + the
+  retries the brief allows>}), mark_product_code({"state": "promise_requested"}))` and the note tool
+  `mark_product_code({"state": "noted"})`, so a settled product is never asked again. The validator rejects any path into
+  the request node that skips the gate, and any global node that returns into it with `__previous__`.
+  In a practice run without the gate, the agent added an unplanned "can you pay the full amount?" before each product's
+  first attempt, so a product allowed one request got two.
 - **Persuasion plans are read, not counted.** If the brief has persuasion attempts per band, put them in
   `date_params.json` as `attempt_offers` (in order, each an amount and a date token, keys at the top of
   `builder/sandbox/date_facts.py`). Each product then gets its own plan in `product_facts`, with exactly as many

@@ -1,0 +1,340 @@
+"""Check a workflow JSON before it goes to Freya.
+
+    python -m builder.validate out/brief-a/workflow.json tools/openapi.json [--call-vars customer_id,first_name,...]
+
+Errors are things the docs say break a workflow or get silently dropped by the platform.
+Warnings are risks worth a look. Exit code 1 when there is an error.
+Sources: docs/workflow-format.md, docs/tools-and-code.md (see their checklists).
+"""
+import argparse
+import json
+import re
+import sys
+
+from builder import openapi_tools
+
+NODE_TYPES = {"conversation", "api_request", "code", "end_call", "transfer_call", "integration",
+              "knowledge_base", "reschedule_call", "invoke_agent", "exit"}
+ACTION_TYPES = NODE_TYPES - {"conversation", "end_call"}
+OPERATORS = {"equals", "not_equals", "greater_than", "less_than", "contains", "is_set", "is_not_set", "always", "matches_intent"}
+EXTRACTOR_PLACEHOLDERS = ("{{extractor.speech}}", "{{extractor.conversation.last-10}}", "{{extractor.type_preamble}}", "{{extractor.variables_list}}")
+PLACEHOLDER = re.compile(r"\{\{\s*([^}:]+?)(?::json)?\s*\}\}")
+AUTO_SUFFIXES = ("_success_count", "_failure_count", "_status_code", ".current_turns", ".total_turns")
+
+
+class Report:
+    def __init__(self):
+        self.items = []
+
+    def error(self, where, msg):
+        self.items.append(("ERROR", where, msg))
+
+    def warn(self, where, msg):
+        self.items.append(("WARN", where, msg))
+
+    @property
+    def errors(self):
+        return [i for i in self.items if i[0] == "ERROR"]
+
+    def text(self):
+        return "\n".join(f"{lvl:5} {where}: {msg}" for lvl, where, msg in self.items) or "OK: no findings"
+
+
+def _nulls(obj, path, rep):
+    if obj is None:
+        rep.warn(path, "null value (docs: the schema rejects null; leave the field out or use \"\")")
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            _nulls(v, f"{path}.{k}", rep)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _nulls(v, f"{path}[{i}]", rep)
+
+
+def _check_code(code, where, rep):
+    if not isinstance(code, str) or not code.strip():
+        return
+    if "{{" in code or "}}" in code:
+        rep.error(where, "code contains a double brace; read values from vars instead of {{...}}")
+    try:
+        compile(code, where, "exec")
+    except SyntaxError as e:
+        rep.error(where, f"Python syntax error: {e}")
+
+
+def _conditions(cond, where, rep, top=True):
+    if not isinstance(cond, dict):
+        rep.error(where, "condition must be an object")
+        return []
+    out = []
+    if "conditions" in cond:
+        if top and cond.get("logic") != "or":
+            rep.error(where, "the top-level condition group must use \"logic\": \"or\" (nest AND groups inside it)")
+        for c in cond["conditions"]:
+            out += _conditions(c, where, rep, top=False)
+        return out
+    op = cond.get("operator")
+    if op not in OPERATORS:
+        rep.error(where, f"unknown operator {op!r}")
+    if op in ("equals", "not_equals", "greater_than", "less_than", "contains", "is_set", "is_not_set") and not cond.get("variable"):
+        rep.error(where, f"operator {op} needs a variable")
+    if op == "matches_intent" and not cond.get("description"):
+        rep.error(where, "matches_intent needs a description")
+    out.append(cond)
+    return out
+
+
+def _bool_pairs(conds, where, rep):
+    seen = {(c.get("variable"), str(c.get("operand"))) for c in conds if c.get("operator") == "equals"}
+    for var, val in seen:
+        if val in ("true", "True", "false", "False"):
+            other = val.lower() if val[0].isupper() else val.capitalize()
+            if (var, other) not in seen:
+                rep.warn(where, f"{var} == {val!r} without {other!r}: booleans arrive as either spelling")
+
+
+def _check_api_tool(tool, where, spec, rep, extraction_names):
+    fn = tool.get("function", {})
+    name = fn.get("name", "")
+    props = fn.get("parameters", {}).get("properties", {})
+    if name not in openapi_tools.tool_names(spec):
+        rep.error(where, f"api_call tool {name!r} is not in the tool API ({', '.join(openapi_tools.tool_names(spec))})")
+        return
+    url = props.get("url", {})
+    if "const" in url and "default" not in url:
+        rep.error(where, "url uses const; only default is sent")
+    expected = openapi_tools.base_url(spec) + "/" + name
+    if url.get("default") != expected:
+        rep.error(where, f"url {url.get('default')!r}, the tool API says {expected!r}")
+    api_props, api_required = openapi_tools.body_schema(spec, name)
+    body = props.get("body", {})
+    if "properties" not in body:
+        rep.error(where, "body fields must be leaves under body.properties")
+        return
+    leaves = body["properties"]
+    for field in set(leaves) - set(api_props):
+        rep.error(where, f"body field {field!r} is not in the tool API")
+    for field in set(api_required) - set(leaves):
+        rep.error(where, f"required body field {field!r} is missing")
+    for field, leaf in leaves.items():
+        if field not in api_props:
+            continue
+        if "const" in leaf and "default" not in leaf:
+            rep.error(where, f"{field} uses const; only default is sent")
+        allowed = api_props[field].get("enum")
+        if allowed and leaf.get("enum") and set(leaf["enum"]) - set(allowed):
+            rep.error(where, f"{field} enum {sorted(set(leaf['enum']) - set(allowed))} not allowed by the tool API")
+        d = leaf.get("default")
+        if allowed and isinstance(d, str) and not PLACEHOLDER.fullmatch(d) and d not in allowed:
+            rep.error(where, f"{field} default {d!r} not allowed by the tool API")
+        if isinstance(d, str) and PLACEHOLDER.fullmatch(d):
+            var = PLACEHOLDER.fullmatch(d).group(1).strip()
+            if var in extraction_names:
+                rep.warn(where, f"{field} default {{{{{var}}}}} has the name of an extracted variable: once set it is baked and the model never fills it")
+        if allowed and not leaf.get("enum") and isinstance(d, str) and PLACEHOLDER.fullmatch(d):
+            rep.warn(where, f"{field} is model-filled without an enum; the tool API allows only {allowed}")
+
+
+def _check_tool(tool, where, spec, rep, extraction_names):
+    fn = tool.get("function", {})
+    handler = fn.get("handler", "")
+    for hook in ("pre_process_code", "post_process_code"):
+        if tool.get(hook):
+            if handler != "__function__:api_call":
+                rep.error(where, f"{hook} on handler {handler}; the platform removes hooks from non-api_call tools")
+            _check_code(tool[hook], f"{where}.{hook}", rep)
+    if handler == "__function__:api_call" and spec is not None:
+        _check_api_tool(tool, where, spec, rep, extraction_names)
+    if handler == "__function__:code_exec":
+        code = fn.get("parameters", {}).get("properties", {}).get("code", {}).get("default")
+        _check_code(code, f"{where}.code", rep)
+    for m in tool.get("response_mapping") or []:
+        if not str(m.get("path", "")).startswith("data."):
+            rep.warn(where, f"response_mapping path {m.get('path')!r} does not start with 'data.'")
+
+
+def _written_vars(code):
+    names = set(re.findall(r"vars\[\s*['\"](\w+)['\"]\s*\]", code or ""))
+    prefixes = set(re.findall(r"vars\[\s*['\"](\w+)['\"]\s*\+", code or ""))
+    return names, prefixes
+
+
+def validate(wf, spec=None, call_vars=None):
+    rep = Report()
+    if not isinstance(wf, dict):
+        rep.error("workflow", "not an object")
+        return rep
+    if "workflow" in wf and "nodes" not in wf:
+        rep.error("workflow", "this looks like an export or request body; pass the inner workflow object")
+        return rep
+    _nulls(wf, "workflow", rep)
+    if "agent_config" in wf:
+        rep.warn("workflow", "agent_config is present; the kit says to leave it out")
+    nodes, globals_ = wf.get("nodes") or {}, wf.get("global_nodes") or {}
+    if not nodes:
+        rep.error("workflow", "no nodes")
+        return rep
+    if wf.get("initial_node") not in nodes:
+        rep.error("workflow", f"initial_node {wf.get('initial_node')!r} is not a node")
+    keys = set(nodes) | set(globals_)
+
+    # Variables that something sets, for the placeholder check.
+    known = set(call_vars or []) | set((wf.get("test_variables") or {}).keys())
+    prefixes = set()
+    extraction_names = set()
+    model_fields = set()
+    all_nodes = [(k, n, False) for k, n in nodes.items()] + [(k, n, True) for k, n in globals_.items()]
+    for key, node, _ in all_nodes:
+        for e in node.get("extraction_schema") or []:
+            extraction_names.add(e.get("name"))
+        for m in node.get("response_mapping") or []:
+            known.add(m.get("variable"))
+        for t in (node.get("tools") or []) + (node.get("pre_actions") or []):
+            for m in t.get("response_mapping") or []:
+                known.add(m.get("variable"))
+            code = t.get("function", {}).get("parameters", {}).get("properties", {}).get("code", {}).get("default", "")
+            for c in (code, t.get("pre_process_code", ""), t.get("post_process_code", "")):
+                n, p = _written_vars(c)
+                known |= n
+                prefixes |= p
+            body = t.get("function", {}).get("parameters", {}).get("properties", {}).get("body", {}).get("properties", {})
+            for leaf in body.values():
+                d = leaf.get("default")
+                if isinstance(d, str) and PLACEHOLDER.fullmatch(d):
+                    model_fields.add(PLACEHOLDER.fullmatch(d).group(1).strip())
+    for t in wf.get("tools") or []:
+        for c in (t.get("pre_process_code", ""), t.get("post_process_code", "")):
+            n, p = _written_vars(c)
+            known |= n
+            prefixes |= p
+    known |= extraction_names
+
+    def var_known(v):
+        if v in known or v in model_fields:
+            return True
+        if v.startswith(("system.", "call.", "date.", "time.", "extractor.")):
+            return True
+        if "_response." in v or "_args." in v or v.endswith(AUTO_SUFFIXES):
+            return True
+        return any(v.startswith(p) for p in prefixes)
+
+    has_end = False
+    for key, node, is_global in all_nodes:
+        where = ("global_nodes." if is_global else "nodes.") + key
+        nt = node.get("node_type")
+        if nt not in NODE_TYPES:
+            rep.error(where, f"unknown node_type {nt!r}")
+        if node.get("name") and node["name"] != key:
+            rep.warn(where, f"name {node['name']!r} differs from the key")
+        if node.get("tools") and nt != "conversation":
+            rep.error(where, "tools on a non-conversation node are removed by the platform")
+        if node.get("pre_actions") and nt not in ACTION_TYPES:
+            rep.error(where, "pre_actions on a conversation or end_call node are removed by the platform")
+        for i, t in enumerate(node.get("tools") or []):
+            if t.get("function", {}).get("handler") == "__function__:end_call":
+                has_end = True
+            _check_tool(t, f"{where}.tools[{i}]", spec, rep, extraction_names)
+        for i, t in enumerate(node.get("pre_actions") or []):
+            if t.get("response_mapping"):
+                rep.error(f"{where}.pre_actions[{i}]", "response_mapping inside a pre_actions entry is ignored; put it on the node")
+            _check_tool(t, f"{where}.pre_actions[{i}]", spec, rep, extraction_names)
+        for e in node.get("extraction_schema") or []:
+            if "min_confidence" not in e:
+                rep.warn(where, f"extraction {e.get('name')!r} has no min_confidence (default 0.95 is strict)")
+            p = e.get("extraction_prompt")
+            if p and not all(x in p for x in EXTRACTOR_PLACEHOLDERS):
+                rep.error(where, f"extraction_prompt of {e.get('name')!r} lacks the extractor placeholders; it would never see the user")
+        trans = node.get("transitions") or []
+        for i, t in enumerate(trans):
+            tgt = t.get("target_node")
+            if tgt not in keys and not (is_global and tgt == "__previous__"):
+                rep.error(f"{where}.transitions[{i}]", f"target_node {tgt!r} does not exist")
+            conds = _conditions(t.get("condition", {}), f"{where}.transitions[{i}]", rep)
+            _bool_pairs(conds, f"{where}.transitions[{i}]", rep)
+        if is_global and node.get("condition"):
+            _conditions(node["condition"], where + ".condition", rep)
+        if node.get("passthrough"):
+            if not trans or trans[-1].get("condition", {}).get("operator") != "always":
+                rep.error(where, "passthrough node must end with an `always` transition or it can deadlock")
+            pdt = node.get("passthrough_default_transition")
+            if not pdt or (pdt not in keys and pdt != "__previous__"):
+                rep.error(where, f"passthrough_default_transition {pdt!r} is missing or not a node")
+        mtt = node.get("max_turn_transition")
+        if mtt and mtt not in keys:
+            rep.error(where, f"max_turn_transition {mtt!r} is not a node")
+        target = nodes.get(mtt) or globals_.get(mtt) or {}
+        api_tools = [t for t in node.get("tools") or [] if t.get("function", {}).get("handler") == "__function__:api_call"]
+        # A node with a single bank tool is a dedicated closing step (wrap-up); its own cap is the last resort.
+        if mtt and nt == "conversation" and target.get("node_type") == "end_call" and len(api_tools) > 1:
+            rep.warn(where, f"turn cap goes straight to end_call node {mtt!r}: the call ends without the closing tool; "
+                            "point it at a wrap-up node (builder.blocks.wrap_up_node)")
+        if node.get("max_node_turns") and not mtt and nt == "conversation":
+            rep.warn(where, "max_node_turns without max_turn_transition changes nothing at the cap")
+        if nt == "end_call":
+            has_end = True
+            if trans:
+                rep.error(where, "end_call node must have no transitions")
+            term = node.get("terminal", {})
+            if term.get("function", {}).get("handler") != "__function__:end_call":
+                rep.error(where, "end_call node needs terminal.function.handler __function__:end_call")
+            if (node.get("on_enter") or {}).get("type") not in (None, "silent"):
+                rep.warn(where, "farewell belongs in the terminal's spoken_message; set on_enter silent")
+        texts = [node.get(f, "") for f in ("task_message", "loop_prompt", "role_message", "routing_prompt")]
+        texts.append((node.get("on_enter") or {}).get("text", ""))
+        for txt in texts:
+            for v in PLACEHOLDER.findall(txt or ""):
+                if not var_known(v.strip()):
+                    rep.warn(where, f"{{{{{v.strip()}}}}} is used in a prompt but nothing visible sets it (call variable?)")
+    for txt in [wf.get("system_prompt", "")]:
+        for v in PLACEHOLDER.findall(txt or ""):
+            if not var_known(v.strip()):
+                rep.warn("system_prompt", f"{{{{{v.strip()}}}}} is used but nothing visible sets it (call variable?)")
+    for i, t in enumerate(wf.get("tools") or []):
+        if not (t.get("config") or {}).get("alwaysRunsAt"):
+            rep.error(f"tools[{i}]", "workflow-level tool without config.alwaysRunsAt never runs")
+        _check_tool(t, f"tools[{i}]", spec, rep, extraction_names)
+    if not has_end:
+        rep.error("workflow", "no end_call node and no end_call tool: the call can never end")
+
+    # Reachability from the initial node (global nodes can fire anywhere).
+    seen, todo = set(), [wf.get("initial_node")] + list(globals_)
+    while todo:
+        k = todo.pop()
+        if k in seen or k not in keys:
+            continue
+        seen.add(k)
+        n = nodes.get(k) or globals_.get(k)
+        todo += [t.get("target_node") for t in n.get("transitions") or []]
+        todo += [n.get("passthrough_default_transition"), n.get("max_turn_transition")]
+    for k in set(nodes) - seen:
+        rep.warn("nodes." + k, "not reachable from initial_node")
+
+    if spec is not None:
+        used = set()
+        for _, node, _ in all_nodes:
+            for t in (node.get("tools") or []) + (node.get("pre_actions") or []):
+                used.add(t.get("function", {}).get("name"))
+        for t in wf.get("tools") or []:
+            used.add(t.get("function", {}).get("name"))
+        for name in openapi_tools.tool_names(spec):
+            if name not in used:
+                rep.warn("workflow", f"tool API call {name!r} is never used; check the brief does not need it")
+    return rep
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("workflow")
+    ap.add_argument("openapi", nargs="?")
+    ap.add_argument("--call-vars", default="", help="comma-separated call variable names from the brief")
+    a = ap.parse_args(argv)
+    with open(a.workflow, encoding="utf-8") as f:
+        wf = json.load(f)
+    spec = openapi_tools.load(a.openapi) if a.openapi else None
+    rep = validate(wf, spec, [v for v in a.call_vars.split(",") if v])
+    print(rep.text())
+    return 1 if rep.errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

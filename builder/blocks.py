@@ -240,6 +240,9 @@ def wrap_up_node(name, close_tool, end_target, *, task=None, tool="close_call", 
 # the same message as two add_note calls; the bank closed first and refused the notes. A prompt rule did not stop it.
 # So the working node has no closing tool: mark_product_code(settled_flag=...) on the promise and note tools raises the
 # flag when every product has a promise requested or a note, and only then does the call move to a closing node.
+# NOT RECOMMENDED (fix13-ab, two practice calls): parallel add_note calls lost each other's ledger writes, the flag
+# never rose, and with no closing tool in the working node the call never closed. Kept for tests and later work; the
+# skill tells the builder not to use it, nor settled_products_extraction (it marked a refused loan as agreed).
 
 SETTLED_FLAG = "all_settled"
 

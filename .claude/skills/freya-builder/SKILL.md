@@ -160,16 +160,15 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   the request node that skips the gate, and any global node that returns into it with `__previous__`.
   In a practice run without the gate, the agent added an unplanned "can you pay the full amount?" before each product's
   first attempt, so a product allowed one request got two.
-  With several products, add `blocks.settled_products_extraction()` to the working node and `"settled_var":
-  "settled_products"` to `offer_gate_code`: a product the customer already agreed is never asked again (in a practice
-  run the gate asked twice more for a card the customer had agreed to pay tomorrow).
-- **When the brief needs a note for every product without a promise: close only after all are settled.** Give the
-  promise and note tools' `mark_product_code` `"settled_flag": blocks.SETTLED_FLAG`, leave the closing tool OUT of the
-  working node, add `blocks.settled_transition(<closing>)` to it and `blocks.closing_node(<closing>, <close tool>,
-  <end>, extra_tools=[<note tool>])`. Transfers keep `outcome_after`; turn caps keep `wrap_up_node`. The validator
-  rejects a closing tool next to settling tools. In a practice run close_call went out in the same message as two
-  add_note calls; the bank closed first and refused the notes. Do not use this when the brief has no such note rule
-  (Brief A style): there a refused product has no note and the flag would never rise.
+- **Several tool calls in one message share the variables badly.** Seen in two practice calls (fix13-ab): two
+  add_note calls went out in one message and their pre-hooks both rewrote the offer ledger; one product's state was
+  lost (once the old state stayed, once both notes vanished). So never make anything that decides routing or closing
+  depend on a variable that pre-hooks of parallel calls write. Do NOT use `mark_product_code(settled_flag=...)` with
+  `blocks.settled_transition` / `blocks.closing_node`: the flag never rose, the working node had no closing tool, and
+  the agent said "Goodbye" for minutes until the call timed out. Keep the closing tool in the working node, with the
+  prompt rule "add_note for every product first, wait for every result, then close_call alone in its own message".
+  Do NOT use `offer_gate_code(settled_var=...)` with `blocks.settled_products_extraction()` either: in a practice call
+  the extraction marked a refused loan as agreed and the gate skipped its second allowed request.
 - **Persuasion plans are read, not counted.** If the brief has persuasion attempts per band, put them in
   `date_params.json` as `attempt_offers` (in order, each an amount and a date token, keys at the top of
   `builder/sandbox/date_facts.py`). Each product then gets its own plan in `product_facts`, with exactly as many

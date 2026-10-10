@@ -15,6 +15,9 @@
 #   non_business_day        what the brief says to offer for a named day that is not a business day, on or before the
 #                           deadline: "next" (next business day), "previous" (previous business day) or "" (no advice)
 #   after_deadline          what the brief says to offer for a named day after the deadline: "deadline" or "" (no advice)
+#   agent_offers            date tokens (as in attempt_offers) the brief has the agent propose outside the persuasion
+#                           attempts, e.g. ["today"] for a first "can you pay today?" (optional, default none)
+#   no_exact_day            what the brief records when the customer gives no exact day: "deadline" or "" (none)
 #   attempt_offers          the brief's persuasion attempts in order, each {amount, date}; a product gets as many as its
 #                           band's `attempts`. amount: "full", "floor" or "full_or_floor" (full, or the floor when the
 #                           customer already said the full amount is too much). date: "today", "next_business_day",
@@ -23,8 +26,9 @@
 #
 # Writes: date_facts, product_facts (text for prompts), today_iso, next_business_day_iso,
 #   last_business_day_this_week_iso, last_business_day_next_week_iso, deadline_<band>, deadline_<product_id>,
-#   product_count, and promise_rules: a JSON string mapping each product_id to its dates, deadline, floor and full amount, that
-#   builder/sandbox/promise_guard.py reads to check a promise before it is sent.
+#   product_count, and promise_rules: a JSON string mapping each product_id to its dates, deadline, floor and full amount
+#   (plus today and the brief's non_business_day / after_deadline choices), that builder/sandbox/promise_guard.py reads
+#   to check a promise before it is sent.
 import json
 import re
 import datetime
@@ -338,9 +342,15 @@ def _main(vars, p):
             vars["deadline_" + pid] = dl.isoformat()
             lookup_items.append((pid, dl))
             rules[pid] = dict(dates=[x.isoformat() for x in _business_days_until(today, dl, p, 400)], deadline=dl.isoformat(),
-                              floor=_num(floor), full=_num(amount))
+                              floor=_num(floor), full=_num(amount), today=today.isoformat(),
+                              non_business_day=p.get("non_business_day", "next"),
+                              after_deadline=p.get("after_deadline", "deadline"))
             plan = _plan(pid, b.get("attempts"), p.get("attempt_offers"), today, dl, amount, floor, p)
             plans[pid] = _plan_steps(b.get("attempts"), p.get("attempt_offers"), today, dl, amount, floor, p)
+            rules[pid]["plan_dates"] = [x["date"] for x in plans[pid]]
+            rules[pid]["agent_dates"] = [x for x in (_offer_date(t, today, dl, p).isoformat()
+                                                     for t in (p.get("agent_offers") or [])) if x in rules[pid]["dates"]]
+            rules[pid]["no_exact_day"] = dl.isoformat() if p.get("no_exact_day") == "deadline" else ""
             order.append(pid)
             labels[pid] = dict((k, str(v)) for k, v in prod.items())
             if plan:

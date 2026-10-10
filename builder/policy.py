@@ -83,6 +83,15 @@ def check(params):
         errors.append(f"non_business_day {params.get('non_business_day')!r} is not one of {NON_BUSINESS}")
     if params.get("after_deadline", "deadline") not in AFTER_DEADLINE:
         errors.append(f"after_deadline {params.get('after_deadline')!r} is not one of {AFTER_DEADLINE}")
+    agent = params.get("agent_offers", [])
+    if not isinstance(agent, list) or any(t not in DATE_TOKENS for t in agent):
+        errors.append(f"agent_offers {agent!r} must be a list of {DATE_TOKENS}")
+    if params.get("no_exact_day", "") not in ("deadline", ""):
+        errors.append(f"no_exact_day {params.get('no_exact_day')!r} is not one of ('deadline', '')")
+    if "agent_offers" not in params or "no_exact_day" not in params:
+        warnings.append("agent_offers / no_exact_day not set: the promise guard then refuses a date the agent proposes "
+                        "outside the persuasion plan (e.g. 'today' in a first 'can you pay today?') and any date when the "
+                        "customer gives no exact day; set both from the brief, [] and '' when it has none")
     for h in params.get("holidays", []) or []:
         if not (isinstance(h, str) and len(h) == 10 and h[4] == "-" and h[7] == "-"):
             errors.append(f"holiday {h!r} is not YYYY-MM-DD")

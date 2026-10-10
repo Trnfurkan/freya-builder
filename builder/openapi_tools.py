@@ -41,13 +41,16 @@ def response_fields(spec, name):
 
 
 def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeout_ms=12000, max_retries=0,
-             pre_hook="", post_hook="", response_mapping=None, enums=None):
+             pre_hook="", post_hook="", response_mapping=None, enums=None, helper_fields=None):
     """One api_call tool.
 
     baked:        {field: value}, sent as given and hidden from the model, e.g. {"customer_id": "{{customer_id}}"}.
                   Every other body field is filled by the model ("default": "{{<field>}}").
     descriptions: {field: text} shown to the model for model-filled fields (added to the file's own description).
     enums:        {field: [values]} to narrow a field's allowed values; must be a subset of the file's enum.
+    helper_fields: {field: description} model-filled fields that are NOT in the tool API. The pre-hook must read and
+                  remove each one before the request goes out (its code says "# strips: <field>"), e.g. the day the
+                  customer named, for snippets.promise_guard_code(named_date_key=...).
     """
     method, _ = operation(spec, name)
     props, required = body_schema(spec, name)
@@ -76,6 +79,12 @@ def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeo
             leaf["description"] = text
         leaf["default"] = baked.get(field, "{{" + field + "}}")
         body[field] = leaf
+    for field, text in (helper_fields or {}).items():
+        if field in props:
+            raise KeyError(f"{name}: helper field {field!r} is already in the tool API")
+        if f"# strips: {field}\n" not in pre_hook + "\n":
+            raise ValueError(f"{name}: helper field {field!r} needs a pre_hook that removes it ('# strips: {field}')")
+        body[field] = {"type": "string", "description": text, "default": "{{" + field + "}}"}
     tool = {
         "type": "function",
         "config": {"timeoutMs": timeout_ms, "maxRetries": max_retries},

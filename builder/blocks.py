@@ -104,6 +104,15 @@ def extract(name, type_, description, enum=None, min_confidence=0.7, pattern=Non
     return e
 
 
+def spoken_date(name="customer_spoken_date", min_confidence=0.7):
+    """Extraction of the last exact day the customer said, as YYYY-MM-DD: the independent witness that the promise
+    guard compares the tool call's customer_named_date with (promise_guard_code spoken_var=<name>)."""
+    return extract(name, "string", "The last exact calendar day the customer themselves said they will pay, as "
+                   "YYYY-MM-DD, counted from the call's current date. Only a day the customer said, never one the agent "
+                   "proposed. If the customer corrects it, the corrected day.", min_confidence=min_confidence,
+                   pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
 # Nodes ----------------------------------------------------------------------------------------------------------
 
 def conversation(name, task, *, tools=(), transitions=(), on_enter=None, first_entry_only=False, extraction=(),

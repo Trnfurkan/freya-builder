@@ -3,7 +3,10 @@
 # It rewrites the model's answer in config["body"] before the request goes out:
 #   date fields      -> YYYY-MM-DD ("14 March 1988", "the fourteenth of March nineteen eighty-eight", "14/03/1988")
 #   numeric answers  -> digits only ("four four seven one", "44 71", "double four seven one")
-# Anything it cannot read is left unchanged, so the service decides.
+# Anything it cannot read is left unchanged, so the service decides. It only rewrites the form of an answer, never
+# picks a value the customer did not say: a wrong answer stays wrong and the service rejects it.
+# A corrected answer ("12 July 1991, sorry, I mean 21 July 1992") counts by its last readable date: the latest exact
+# answer decides.
 # Rules for this file: only json, re and datetime; never raise; no double braces.
 #
 # PARAMS keys:
@@ -12,6 +15,7 @@
 #   date_fields    values of field_key whose answer is a full date
 #   day_first      read an all-numeric date as day, month, year (true) or month, day, year (false)
 #   numeric_fields values of field_key whose answer is digits only (optional; else any all-number answer)
+#   all_dates      true: the answer is always a date, whatever field_key says (e.g. a promise's named day)
 import json
 import re
 import datetime
@@ -124,7 +128,21 @@ def _spoken_digits(nums):
     return s or None
 
 
+_CORRECTION = re.compile(r"\b(?:sorry|i mean|i meant|no wait|wait|actually|correction|rather|no,? it is|no,? it's)\b",
+                         re.IGNORECASE)
+
+
 def _date(text, day_first):
+    """The customer's last readable date in the text: after a correction word, the part after the last one wins."""
+    parts = [x for x in _CORRECTION.split(text) if x and x.strip(" ,.;-")]
+    for part in reversed(parts):
+        got = _one_date(part.strip(" ,.;-"), day_first)
+        if got:
+            return got
+    return None
+
+
+def _one_date(text, day_first):
     raw = text.strip()
     m = re.match(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$", raw)
     if m:
@@ -187,7 +205,7 @@ def normalize(field, answer, p):
     text = str(answer).strip()
     if not text:
         return answer
-    if field is not None and str(field) in (p.get("date_fields") or []):
+    if p.get("all_dates") or (field is not None and str(field) in (p.get("date_fields") or [])):
         return _date(text, bool(p.get("day_first", True))) or answer
     numeric = p.get("numeric_fields")
     if numeric is not None and str(field) not in numeric:

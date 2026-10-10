@@ -41,8 +41,16 @@ def post_result_code(on_success="", on_failure="", when=None, *, flag_false=True
 
 
 def promise_guard_code(params):
-    """pre_process_code for the promise tool: blocks a date or amount the account's rules do not allow."""
-    return build("promise_guard", params)
+    """pre_process_code for the promise tool: blocks a date or amount the account's rules do not allow.
+
+    With params["named_date_key"] the tool gets a helper field (openapi_tools.api_tool(helper_fields=...)) for the day
+    the customer named. The shared date normalizer reads it first (spoken dates to YYYY-MM-DD, day first unless
+    params["day_first"] is false), then the guard checks the date against it and removes it from the body."""
+    key = params.get("named_date_key")
+    if not key:
+        return build("promise_guard", params)
+    norm = normalize_answer_code({"answer_key": key, "all_dates": True, "day_first": params.get("day_first", True)})
+    return chain(norm, build("promise_guard", params)) + "\n# strips: " + key + "\n"
 
 
 def offer_gate_code(params):

@@ -31,7 +31,9 @@ def policy_from_brief(path):
             "floor_field_by_type": {"credit_card": "minimum_payment", "personal_loan": "instalment_amount", "car_loan": "instalment_amount"},
             # Brief A rule 30, in the policy's tokens: attempt 1 full (or floor) at the end of the week, attempt 2 floor on the deadline.
             "attempt_offers": [{"amount": "full_or_floor", "date": "end_of_week"}, {"amount": "floor", "date": "deadline"}],
-            "non_business_day": "next", "after_deadline": "deadline"}
+            "non_business_day": "next", "after_deadline": "deadline",
+            # Brief A rule 28 (first ask: "Can you make this payment today?") and rule 21 (no exact day: the deadline).
+            "agent_offers": ["today"], "no_exact_day": "deadline"}
 
 
 POLICY = policy_from_brief("briefs/brief-a.md")

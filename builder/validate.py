@@ -112,8 +112,14 @@ def _check_api_tool(tool, where, spec, rep, extraction_names):
         rep.error(where, "body fields must be leaves under body.properties")
         return
     leaves = body["properties"]
+    hook = str(tool.get("pre_process_code") or "")
     for field in set(leaves) - set(api_props):
+        if f"# strips: {field}\n" in hook + "\n":
+            continue   # a model-filled helper field that the pre-hook reads and removes before sending
         rep.error(where, f"body field {field!r} is not in the tool API")
+    if "def source_check(" in hook and "# strips: " not in hook:
+        rep.warn(where, "promise guard without named_date_key: a date inside the allowed range is not checked against "
+                        "the day the customer said (a practice agent recorded the deadline for a holiday that came before it)")
     for field in set(api_required) - set(leaves):
         rep.error(where, f"required body field {field!r} is missing")
     for field, leaf in leaves.items():

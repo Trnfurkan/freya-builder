@@ -87,6 +87,9 @@ def classify(command):
     return found
 
 
+NAME_END = r"\s'\";&|()<>,`"
+
+
 class Gate:
     """Refuses tool calls that would break this run's limits, before they run.
     - practice simulations: at most `max_sims`, and none that cannot finish before the deadline;
@@ -97,6 +100,8 @@ class Gate:
 
     SIM_MINUTES = 11      # README: a ten-customer run takes 3 to 11 minutes
     PRIVATE = ("traces", "public-test-set.json")
+    # Characters that end a file name in a shell command: whitespace, quotes and shell operators.
+    # (A first version kept ";" in the name and refused "cat briefs/brief-b.md;" and "mkdir out/<own slot>;".)
 
     def __init__(self, slot, max_sims, deadline, now=None, briefs=(), kit=KIT):
         self.slot, self.max_sims, self.deadline = slot, max_sims, deadline
@@ -121,17 +126,17 @@ class Gate:
         """Why text that names files may not be used, or None."""
         t = self._norm(text)
         lead = r"(?:^|[\s'\"=(:,;])(?:\./|/)?"
-        for m in re.finditer(lead + r"out/([^/\s'\"]*)", t):
+        for m in re.finditer(lead + r"out/([^/" + NAME_END + r"]*)", t):
             if m.group(1) != self.slot:
                 return f"Refused: out/{m.group(1) or '*'} is not this build's folder. Use only out/{self.slot}/."
-        for m in re.finditer(lead + r"results/([^\s'\"]*)", t):
+        for m in re.finditer(lead + r"results/([^" + NAME_END + r"]*)", t):
             if not m.group(1).startswith(self.slot):
                 return f"Refused: only results/{self.slot}-* belong to this build."
         for private in self.PRIVATE:
             tail = r"(?:/|$)" if "." not in private else r"(?:/|$|[\s'\"])"   # a folder needs its slash or the end
             if re.search(lead + re.escape(private) + tail, t):
                 return f"Refused: {private} is not input for a build. Build from the brief and the tool API file."
-        for m in re.finditer(lead + r"briefs/([^\s'\"]*)", t):
+        for m in re.finditer(lead + r"briefs/([^" + NAME_END + r"]*)", t):
             if self.briefs and m.group(1) not in self.briefs:
                 return f"Refused: only the given brief files may be read: {', '.join(sorted(self.briefs))}."
         return None

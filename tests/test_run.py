@@ -130,3 +130,17 @@ def test_isolation_does_not_trip_on_ordinary_words():
     g = _iso_gate()
     assert g.decide("echo 'stack traces here'; echo results are in") is None
     assert g.decide("ls traces") and g.decide("cat traces/x.txt")
+
+
+def test_isolation_names_end_at_shell_operators():
+    # Both commands were refused in a real build because ";" was read as part of the file name.
+    now = datetime.datetime(2026, 10, 11, 10, 0)
+    g = run.Gate("fix2-ab-20261010", 2, now + datetime.timedelta(minutes=25), now=lambda: now,
+                 briefs=[run.KIT / "briefs" / "brief-a.md", run.KIT / "briefs" / "brief-b.md"])
+    kit = run.KIT.as_posix()
+    assert g.decide(f"cd {kit}; cat briefs/brief-a.md; echo =====; cat briefs/brief-b.md; ls examples docs builder builder/sandbox") is None
+    assert g.decide(f"cd {kit}; mkdir -p out/fix2-ab-20261010; cat > out/fix2-ab-20261010/date_params.json <<'EOF'\n{{}}\nEOF") is None
+    for tail in (";", "&&", "|", ")", ",", ">"):
+        assert g.decide(f"cat out/fix2-ab-20261010/rules.md{tail} echo") is None, tail
+        assert g.decide(f"cat out/other{tail} echo"), tail
+    assert g.decide("cat briefs/brief-c.md; echo")

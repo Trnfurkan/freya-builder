@@ -6,7 +6,7 @@ import pytest
 from builder import openapi_tools as ot
 from builder import snippets
 from builder.validate import validate
-from tests.conftest import KIT
+from tests.conftest import KIT, no_attempts
 
 
 def end_node(name):
@@ -26,7 +26,7 @@ def wf(openapi, params_a):
             "setup": {"name": "setup", "node_type": "code", "passthrough": True, "passthrough_default_transition": "talk",
                       "on_enter": {"type": "silent"},
                       "pre_actions": [{"type": "function", "function": {"name": "code_exec", "handler": "__function__:code_exec",
-                                                                          "parameters": {"type": "object", "properties": {"code": {"type": "string", "default": snippets.date_facts_code(params_a)}}}}}],
+                                                                          "parameters": {"type": "object", "properties": {"code": {"type": "string", "default": snippets.date_facts_code(no_attempts(params_a))}}}}}],
                       "transitions": [{"target_node": "talk", "description": "always", "condition": always}]},
             "talk": {"name": "talk", "node_type": "conversation", "task_message": "Facts: {{date_facts}}. Customer {{first_name}}.",
                      "tools": [ot.api_tool(openapi, "close_call", baked={"customer_id": "{{customer_id}}"},

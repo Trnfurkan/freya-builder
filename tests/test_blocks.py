@@ -4,6 +4,7 @@ from builder import blocks as b
 from builder import openapi_tools as ot
 from builder import snippets
 from builder.validate import validate
+from tests.conftest import no_attempts
 
 
 def test_conditions_shapes():
@@ -58,7 +59,7 @@ def test_duplicate_nodes_rejected():
 
 
 def test_full_workflow_from_blocks_validates(openapi, params_a):
-    facts = snippets.date_facts_code(params_a)
+    facts = snippets.date_facts_code(no_attempts(params_a))
     cid = {"customer_id": "{{customer_id}}"}
     verify = ot.api_tool(openapi, "verify_identity", baked=cid,
                          pre_hook=snippets.normalize_answer_code({"field_key": "field", "answer_key": "answer",
@@ -134,7 +135,7 @@ def test_validator_warns_when_a_turn_cap_skips_the_closing_tool(openapi):
 
 def test_recommended_pattern_validates_without_closing_warnings(openapi, params_a):
     cid = {"customer_id": "{{customer_id}}"}
-    facts = snippets.date_facts_code(params_a)
+    facts = snippets.date_facts_code(no_attempts(params_a))
     close = ot.api_tool(openapi, "close_call", baked=cid, post_hook=b.close_post_hook(snippets))
     promise = ot.api_tool(openapi, "create_promise", baked=cid,
                           pre_hook=snippets.promise_guard_code({"check_dates": True, "check_amount": True}),
@@ -166,9 +167,9 @@ def test_failure_rules_with_engine_retries():
     assert 'say exactly: "I could not record the promise."' in text and "Then close with" in text
 
 
-def test_failure_rules_without_engine_retries_asks_for_one_silent_retry():
+def test_failure_rules_without_engine_retries_asks_for_one_retry_with_a_holding_line():
     text = b.failure_rules("create_promise", "I could not record the promise.")
-    assert "call it again at once with exactly the same values, without saying anything" in text
+    assert 'say only "One moment, please." and, in the same message, call create_promise again with exactly the same values' in text
     assert 'If it fails again, say exactly: "I could not record the promise."' in text
     assert "{{" not in text
 

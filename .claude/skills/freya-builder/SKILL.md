@@ -146,8 +146,10 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   a cut-off or partial answer is not a new refusal: wait for the rest instead of asking again. When attempts are counted
   per item (per product, per question), the prompt shows a separate counter for each item with its own limit taken from
   the facts ("attempts used on p3: 0 of 1"), and the agent moves to the next item when an item's limit is reached.
-- **Payment requests only through the offer gate.** When the brief limits how often the customer may be asked to pay
-  (attempts per product or band, "offer once"), the agent must not word requests itself. Build `blocks.offer_loop(
+- **Payment requests only through the offer gate (required).** When the brief limits how often the customer may be
+  asked to pay (attempts per product or band, "offer once"), the agent must not word requests itself; the validator
+  reports a missing gate as an ERROR, and a build with that error is not deliverable. Build it in the first version,
+  not as a later improvement: a practice build skipped it "for time" and kept failing the attempts check. Build `blocks.offer_loop(
   "offer_gate", "offer_request", <working node>, snippets.offer_gate_code({...}))` and put `blocks.to_gate("offer_gate")`
   in the working node's transitions. The gate counts each request per product in `vars` (never reset by any route) and
   prepares the next allowed one from the plan; the request node says it word for word and the customer's answer routes
@@ -186,6 +188,9 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
     node's prompt. That build passed the tool-failure customer on its next run.
   - Retry only when `openapi_tools.repeatable_on_failure(spec, tool)` is true (the tool API file says a failed call
     records nothing and may be repeated); otherwise follow only what the brief says.
+  - While retrying, the agent says only a short natural holding line (`holding_line=` in the call's language) and
+    calls again in the same message. Only a result with `ok` true proves a record: the tool API has no call to read
+    records back, so an error or a missing answer is never reported as recorded.
   - The customer never hears about errors, retries or systems; on a final failure only the brief's own sentence, said
     once and calmly, then the brief's next step. Never close the call because of a failure the brief lets you retry.
   - The post-hook instructions still matter for answers that come back normally with `ok` false.

@@ -29,3 +29,9 @@ def params_a():
         "product_fields": {"id": "product_id", "type": "type", "days_late": "days_late", "amount": "past_due"},
         "floor_field_by_type": {"credit_card": "minimum_payment", "personal_loan": "instalment_amount", "car_loan": "instalment_amount"},
     }
+
+
+def no_attempts(params):
+    """The policy without persuasion attempts: for tests about other features. With attempts, the validator requires
+    the offer gate (tested in test_offer_gate.py)."""
+    return {**params, "bands": [{**band, "attempts": 0} for band in params["bands"]]}

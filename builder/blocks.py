@@ -286,20 +286,26 @@ def to_gate(gate_name, when="The customer refused to pay (no date, no amount) an
 # tool description and the prompt (always visible). The engine's maxRetries did not repeat a call after an HTTP 500 in a
 # later practice build, so the model does the retry (engine_retries=0, the default); that build then passed.
 
-def failure_rules(tool, final_line, *, engine_retries=0, then=""):
+def failure_rules(tool, final_line, *, engine_retries=0, then="", holding_line="One moment, please."):
     """Text for the tool description and the prompt: what a failed call means and what to say.
-    final_line: the brief's sentence for when all allowed attempts failed. then: what the brief says to do next."""
+    final_line: the brief's sentence for when all allowed attempts failed. then: what the brief says to do next.
+    holding_line: a short natural line said while trying again (in the call's language).
+    Only an answer from the bank with ok true proves a record; the tool API has no call to read records back, so an
+    error or a missing answer is never reported as recorded. The number of calls that reach the bank is limited in code
+    (promise_guard max_attempts), separately from the payment requests the customer hears (offer gate)."""
+    proof = (f"Only a {tool} result with ok true means it is recorded; after an error or no answer it is not "
+             "confirmed, so never say or imply that it is recorded.")
     if engine_retries:
         attempts = (f"The system already repeated a failed {tool} call {engine_retries} time(s) by itself, so an error "
                     "you see means every allowed attempt failed.")
         act = f'say exactly: "{final_line}"' + (f" Then {then}" if then else "")
     else:
-        attempts = (f"The first time {tool} fails in this call, call it again at once with exactly the same values, "
-                    "without saying anything about it.")
+        attempts = (f'The first time {tool} fails in this call, say only "{holding_line}" and, in the same message, call '
+                    f"{tool} again with exactly the same values. Do not ask the customer anything again.")
         act = f'If it fails again, say exactly: "{final_line}"' + (f" Then {then}" if then else "")
     return (f"If {tool} returns an error (for example 'API request failed', 'service unavailable' or ok false), "
-            "nothing was recorded. Never describe a technical error to the customer, never apologise at length, and "
-            f"never end the call because of a failure on its own. {attempts} {act}")
+            "nothing was recorded. Never describe a technical error, a system or a retry to the customer, never apologise "
+            f"at length, and never end the call because of a failure on its own. {proof} {attempts} {act}")
 
 
 # Workflow -------------------------------------------------------------------------------------------------------

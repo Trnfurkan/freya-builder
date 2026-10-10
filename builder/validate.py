@@ -173,6 +173,24 @@ def _codes(node):
     return [c for c in out if c]
 
 
+def policy_in_workflow(wf):
+    """The policy the date facts code node carries (its PARAMS line), or None."""
+    import ast
+    nodes = list((wf.get("nodes") or {}).values()) + list((wf.get("global_nodes") or {}).values())
+    for n in nodes:
+        for c in _codes(n):
+            if "attempt_offers" not in c and "deadline_business_days" not in c:
+                continue
+            first = c.split("\n")[1] if c.startswith("import json\nPARAMS = json.loads(") else ""
+            if not first.startswith("PARAMS = json.loads("):
+                continue
+            try:
+                return json.loads(ast.literal_eval(first[len("PARAMS = json.loads("):-1]))
+            except Exception:
+                continue
+    return None
+
+
 def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
     """Payment requests must pass the offer gate (builder/blocks.offer_loop). Every path into a node that says
     {{offer_line}} must come from a gate code node; nothing else may say the line, return into it with __previous__,
@@ -182,6 +200,11 @@ def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
     line = "{{offer_line}}"
     say_nodes = {k for k, n, _ in every if line in str((n.get("on_enter") or {}).get("text", ""))}
     gates = {k for k, n, _ in every if any(GATE_MARK in c for c in _codes(n))}
+    pol = policy_in_workflow(wf) or {}
+    limited = any(isinstance(b, dict) and int(b.get("attempts") or 0) > 0 for b in pol.get("bands") or [])
+    if limited and (not gates or not say_nodes):
+        rep.error("workflow", "the policy allows a limited number of persuasion attempts but the workflow has no "
+                              "offer gate: build the requests with builder.blocks.offer_loop and to_gate")
     if not say_nodes and not gates:
         return
     if not gates:

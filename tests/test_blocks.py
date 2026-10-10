@@ -156,3 +156,18 @@ def test_recommended_pattern_validates_without_closing_warnings(openapi, params_
     rep = validate(wf, openapi, ["customer_id", "now"])
     assert rep.errors == [], rep.text()
     assert not [m for _, _, m in rep.items if "turn cap" in m or "is used in a prompt" in m], rep.text()
+
+
+def test_failure_rules_with_engine_retries():
+    text = b.failure_rules("create_promise", "I could not record the promise.", engine_retries=1,
+                           then="close with the brief's outcome for a service failure.")
+    assert "nothing was recorded" in text and "Never describe a technical error" in text
+    assert "already repeated a failed create_promise call 1 time(s)" in text
+    assert 'say exactly: "I could not record the promise."' in text and "Then close with" in text
+
+
+def test_failure_rules_without_engine_retries_asks_for_one_silent_retry():
+    text = b.failure_rules("create_promise", "I could not record the promise.")
+    assert "call it again at once with exactly the same values, without saying anything" in text
+    assert 'If it fails again, say exactly: "I could not record the promise."' in text
+    assert "{{" not in text

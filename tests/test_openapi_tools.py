@@ -51,3 +51,10 @@ def test_hooks_and_mapping_attached(openapi):
                     response_mapping=[{"path": "data.products", "variable": "products"}])
     assert t["post_process_code"] == "x = 1"
     assert t["response_mapping"] == [{"path": "data.products", "variable": "products"}]
+
+
+def test_repeatable_on_failure_reads_the_error_responses(openapi):
+    assert all(ot.repeatable_on_failure(openapi, n) for n in ot.tool_names(openapi))
+    spec = {"servers": [{"url": "https://x"}], "paths": {"/write": {"post": {"responses": {
+        "200": {"description": "ok"}, "500": {"description": "The service failed. Something may be half recorded."}}}}}}
+    assert ot.repeatable_on_failure(spec, "write") is False

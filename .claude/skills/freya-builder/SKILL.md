@@ -34,6 +34,10 @@ brief files and the tool API file. Never use a value, name, phrase or rule from 
    why, from the brief's own words (an explicit "this comes before" or "replaces" wins; otherwise the more specific rule).
    List what the brief leaves open and the safe choice you made. This file is your checklist; nothing in the brief may be
    missing from it.
+   Then list the **sequences**: for each kind of customer answer, which rules can apply one after another, and in which
+   order. Practice agents failed most often here, not on single rules: a vague period followed by an exact day, a
+   refusal followed by an amount, a too-high amount followed by a refusal of the lower one. Write the order into the
+   prompt as steps, with the rule that applies to the customer's latest answer.
 
 3. **Date and amount facts.** If the brief has business days, holidays, deadlines or bands, write `out/<slot>/date_params.json`
    for `builder/sandbox/date_facts.py` (keys at the top of that file; field names from the tool API file). Check it:
@@ -129,9 +133,25 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   request) instead of asking the model.
 - **One-time offers and counted steps.** When the brief says something is offered or asked once (a floor, a deadline, an
   exact day, a second ask), say so in the prompt as a list of offers with "made: yes/no" the agent keeps track of, and that
-  a cut-off or partial answer is not a new refusal: wait for the rest instead of asking again.
+  a cut-off or partial answer is not a new refusal: wait for the rest instead of asking again. When attempts are counted
+  per item (per product, per question), the prompt shows a separate counter for each item with its own limit taken from
+  the facts ("attempts used on p3: 0 of 1"), and the agent moves to the next item when an item's limit is reached.
+- **The latest, most specific answer decides.** A vague answer ("next week") and an exact one ("the 26th") call for
+  different rules. Once the customer gives an exact value, apply the rule for that value (for example a day that is not
+  allowed, and what to offer instead); the rule for vague answers no longer applies. Say this in the prompt next to the
+  date and amount rules. Practice agents kept applying the vague rule after the customer had named a day.
 - **Honesty.** The agent says something is recorded, booked or transferred only after the tool result says so. The
   tool-result instruction tells it exactly what to say on failure.
+- **Tool failures.** When the bank answers with an HTTP error, the platform reports a `function_call_error`: the tool's
+  post-hook does not run, so nothing in `post_result_code` reaches the model. In practice runs the agent then apologised
+  for "a technical error", said goodbye and closed, every time, though the brief allowed another try. So:
+  - If `openapi_tools.repeatable_on_failure(spec, tool)` is true (the tool API file says a failed call records nothing
+    and may be repeated) and the brief allows N more tries, give the tool `max_retries=N`: the engine repeats it.
+  - Put `blocks.failure_rules(tool, <the brief's sentence for a final failure>, engine_retries=N, then=<what the brief
+    says next>)` into the tool's description and into the node's prompt.
+  - The customer never hears about errors, retries or systems; on a final failure only the brief's own sentence, said
+    once and calmly, then the brief's next step. Never close the call because of a failure the brief lets you retry.
+  - The post-hook instructions still matter for answers that come back normally with `ok` false.
 - **Only the bank's tools.** The agent may call only the tools in the tool API file (plus ending the call). No other URLs,
   no invented tools, fields or enum values, no terms the brief does not allow.
 

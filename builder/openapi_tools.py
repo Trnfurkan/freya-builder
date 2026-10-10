@@ -101,3 +101,15 @@ def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeo
     if response_mapping:
         tool["response_mapping"] = list(response_mapping)
     return tool
+
+
+def repeatable_on_failure(spec, name):
+    """True when the tool API file says a failed call records nothing and may be repeated, so the engine may retry it
+    (config.maxRetries) without recording anything twice. Read from the error responses' descriptions."""
+    _, op = operation(spec, name)
+    for code, resp in (op.get("responses") or {}).items():
+        if str(code).startswith("5"):
+            text = str(resp.get("description", "")).lower()
+            if "may be repeated" in text or ("nothing was recorded" in text and "repeat" in text):
+                return True
+    return False

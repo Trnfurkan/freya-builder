@@ -226,6 +226,29 @@ def wrap_up_node(name, close_tool, end_target, *, task=None, tool="close_call", 
                         transitions=[closed_transition(end_target, tool)], max_turns=max_turns, max_turn_target=end_target)
 
 
+# Tool failures --------------------------------------------------------------------------------------------------
+# Seen in practice runs: when the bank answered a write with HTTP 500, the platform logged "function_call_error",
+# the tool's post-hook did not run, and the model only saw "API request failed: ...". With no instruction it apologised,
+# said goodbye and closed, in every run, although the brief allowed one more try. So the failure rules must be in the
+# tool description and the prompt (always visible), and the retry itself is best left to the engine (maxRetries) when
+# the tool API file says a failed call records nothing and may be repeated.
+
+def failure_rules(tool, final_line, *, engine_retries=0, then=""):
+    """Text for the tool description and the prompt: what a failed call means and what to say.
+    final_line: the brief's sentence for when all allowed attempts failed. then: what the brief says to do next."""
+    if engine_retries:
+        attempts = (f"The system already repeated a failed {tool} call {engine_retries} time(s) by itself, so an error "
+                    "you see means every allowed attempt failed.")
+        act = f'say exactly: "{final_line}"' + (f" Then {then}" if then else "")
+    else:
+        attempts = (f"The first time {tool} fails in this call, call it again at once with exactly the same values, "
+                    "without saying anything about it.")
+        act = f'If it fails again, say exactly: "{final_line}"' + (f" Then {then}" if then else "")
+    return (f"If {tool} returns an error (for example 'API request failed', 'service unavailable' or ok false), "
+            "nothing was recorded. Never describe a technical error to the customer, never apologise at length, and "
+            f"never end the call because of a failure on its own. {attempts} {act}")
+
+
 # Workflow -------------------------------------------------------------------------------------------------------
 
 def workflow(initial, nodes, *, system_prompt="", global_nodes=(), test_variables=None, lifecycle_tools=()):

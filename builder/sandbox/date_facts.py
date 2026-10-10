@@ -12,6 +12,9 @@
 #   product_fields          {id, type, days_late, amount} field names in one product (optional)
 #   floor_field_by_type     {product type: field holding that type's floor} (optional)
 #   list_days               how many business days to list per band (optional, default 25)
+#   non_business_day        what the brief says to offer for a named day that is not a business day, on or before the
+#                           deadline: "next" (next business day), "previous" (previous business day) or "" (no advice)
+#   after_deadline          what the brief says to offer for a named day after the deadline: "deadline" or "" (no advice)
 #
 # Writes: date_facts, product_facts (text for prompts), today_iso, next_business_day_iso,
 #   last_business_day_this_week_iso, last_business_day_next_week_iso, deadline_<band>, deadline_<product_id>,
@@ -56,6 +59,41 @@ def _last_business_of_week(d, p):
         if _is_business(x, p):
             return x
     return None
+
+
+def _prev_business(d, p):
+    d = d - datetime.timedelta(days=1)
+    while not _is_business(d, p):
+        d = d - datetime.timedelta(days=1)
+    return d
+
+
+def _actions(today, deadline, p):
+    """The days a customer may name that cannot be recorded for a band, each with what to offer instead.
+    Practice agents compared dates wrongly (a holiday before the deadline treated as after it), so the answer is
+    precomputed and the agent only looks it up."""
+    move = p.get("non_business_day", "next")
+    after = p.get("after_deadline", "deadline")
+    items, d = [], today
+    while d <= deadline:
+        if not _is_business(d, p):
+            kind = "holiday" if d.isoformat() in p.get("holidays", []) else "weekend"
+            target = None
+            if move == "next":
+                target = _next_business(d, p)
+            elif move == "previous":
+                target = _prev_business(d, p)
+                if target < today:
+                    target = _next_business(d, p)
+            if target is not None and target <= deadline:
+                items.append(_label(d) + " (" + kind + ") -> offer " + _label(target))
+            else:
+                items.append(_label(d) + " (" + kind + ") -> cannot be recorded")
+        d = d + datetime.timedelta(days=1)
+    tail = "any day after " + _label(deadline) + (" -> say the latest date you can record is " + _label(deadline)
+                                                 + " and offer it" if after == "deadline" else " -> cannot be recorded")
+    head = "a day before today -> cannot be recorded"
+    return [head] + items + [tail]
 
 
 def _band(days_late, p):
@@ -165,6 +203,10 @@ def _main(vars, p):
                      + "): deadline " + _label(dl) + " (business day number " + str(b["deadline_business_days"])
                      + " after today); persuasion attempts " + str(b.get("attempts", "")) + ".")
         lines.append("  Allowed promise dates for this band: " + ", ".join(_label(x) for x in days) + ".")
+        acts = _actions(today, dl, p)
+        lines.append("  If the customer names a day that is not allowed for this band, look it up here and say exactly "
+                     "what it says; never work it out yourself: " + "; ".join(acts) + ".")
+        vars["date_actions_" + str(b["name"])] = "; ".join(acts)
     vars["date_facts"] = "\n".join(lines)
 
     products = _load_products(vars, p)
@@ -190,7 +232,8 @@ def _main(vars, p):
             text += ". Floor (" + floor_field + ") " + _money(floor)
         if b is not None:
             dl = _nth_business_after(today, b["deadline_business_days"], p)
-            text += ". Band " + str(b["name"]) + ", deadline " + _label(dl) + ", persuasion attempts " + str(b.get("attempts", ""))
+            text += (". Band " + str(b["name"]) + ", deadline " + _label(dl) + ", persuasion attempts " + str(b.get("attempts", ""))
+                     + ". For a day the customer names, use band " + str(b["name"]) + "'s table")
             vars["deadline_" + pid] = dl.isoformat()
             rules[pid] = dict(dates=[x.isoformat() for x in _business_days_until(today, dl, p, 400)], deadline=dl.isoformat(),
                               floor=_num(floor), full=_num(amount))

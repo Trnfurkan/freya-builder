@@ -144,6 +144,10 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   a cut-off or partial answer is not a new refusal: wait for the rest instead of asking again. When attempts are counted
   per item (per product, per question), the prompt shows a separate counter for each item with its own limit taken from
   the facts ("attempts used on p3: 0 of 1"), and the agent moves to the next item when an item's limit is reached.
+- **Named days are looked up, not reasoned about.** The date facts hold, per band, a table of the days that cannot be
+  recorded and what to offer instead (`non_business_day` and `after_deadline` in `date_params.json`, from the brief).
+  Tell the agent to look a named day up there and say exactly what it says. A practice agent that had the right rule in
+  its prompt still offered the deadline for a holiday that came before it, in 3 runs out of 3.
 - **The latest, most specific answer decides.** A vague answer ("next week") and an exact one ("the 26th") call for
   different rules. Once the customer gives an exact value, apply the rule for that value (for example a day that is not
   allowed, and what to offer instead); the rule for vague answers no longer applies. Say this in the prompt next to the

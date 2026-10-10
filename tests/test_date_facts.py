@@ -95,3 +95,39 @@ def test_other_calendar_rules():
 def test_code_has_no_double_braces(params_a):
     code = snippets.date_facts_code({**params_a, "nested": {"a": {"b": 1}}})
     assert "{{" not in code and "}}" not in code
+
+
+def test_action_table_answers_named_days_per_band(params_a):
+    # PUB-07: a holiday before the early-band deadline must get the next business day, not the deadline.
+    v = facts(params_a, "2026-10-14T11:00")
+    early, late = v["date_actions_early"], v["date_actions_late"]
+    assert "Monday 2026-10-26 (holiday) -> offer Tuesday 2026-10-27" in early
+    assert "Saturday 2026-10-17 (weekend) -> offer Monday 2026-10-19" in early
+    assert early.endswith("any day after Monday 2026-11-02 -> say the latest date you can record is Monday 2026-11-02 and offer it")
+    assert "2026-10-26" not in late.split("any day after")[0]          # after the late deadline: covered by the tail
+    assert "any day after Friday 2026-10-23" in late
+    assert "look it up here and say exactly what it says" in v["date_facts"]
+
+
+def test_action_table_follows_the_brief_choices(params_a):
+    prev = facts({**params_a, "non_business_day": "previous", "after_deadline": ""}, "2026-10-14T11:00")["date_actions_early"]
+    assert "Monday 2026-10-26 (holiday) -> offer Friday 2026-10-23" in prev
+    assert "Saturday 2026-10-17 (weekend) -> offer Friday 2026-10-16" in prev
+    assert prev.endswith("any day after Monday 2026-11-02 -> cannot be recorded")
+    none = facts({**params_a, "non_business_day": ""}, "2026-10-14T11:00")["date_actions_early"]
+    assert "Monday 2026-10-26 (holiday) -> cannot be recorded" in none
+
+
+def test_previous_business_day_never_before_today(params_a):
+    # Saturday right after a Friday "today": the previous business day is today, which is allowed.
+    v = facts({**params_a, "non_business_day": "previous"}, "2026-10-16T11:00")["date_actions_early"]
+    assert "Saturday 2026-10-17 (weekend) -> offer Friday 2026-10-16" in v
+    # Today is a Saturday: the previous business day is in the past, so the next one is offered.
+    w = facts({**params_a, "non_business_day": "previous"}, "2026-10-17T11:00")["date_actions_early"]
+    assert "Saturday 2026-10-17 (weekend) -> offer Monday 2026-10-19" in w
+
+
+def test_product_line_points_to_its_band_table(params_a):
+    prods = [{"product_id": "p1", "type": "personal_loan", "past_due": 540.0, "days_late": 5, "instalment_amount": 180.0}]
+    v = facts(params_a, "2026-10-14T11:00", prods)
+    assert "use band early's table" in v["product_facts"]

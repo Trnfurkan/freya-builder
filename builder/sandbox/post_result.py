@@ -16,7 +16,26 @@
 #   fail_count_var  variable that counts this tool's failed calls (a blocked guard request does not count)
 #   fail_limit      on the failure that reaches this count, on_failure_final replaces on_failure
 #   on_failure_final instruction for that last failure (for "try once more, then ..." rules)
+#   on_rejected     instruction when the service answered normally (HTTP below 400) with ok false and an `error`: the
+#                   tool API says "ok is false when the action was not carried out", a decision, not a service failure
+#                   (that is HTTP 500: "Nothing was recorded. The call may be repeated."). The text "<error>" in it is
+#                   replaced by the service's error. Not counted as a failed attempt. Without it, on_failure applies.
+#                   Seen in a practice run: a second create_promise for a recorded product got "this product already
+#                   has a promise"; treated as a failure, the agent repeated it, ran out of attempts, said the promise
+#                   could not be recorded and closed as service_error although the promise was recorded.
 import json
+
+
+def _rejected(res, data):
+    """The service answered normally but did not carry the action out, and said why."""
+    try:
+        if str(res.get("status", "success")).lower() != "success" or int(res.get("status_code", 200)) >= 400:
+            return ""
+    except Exception:
+        return ""
+    if isinstance(data, dict) and str(data.get("ok", "true")).lower() == "false" and data.get("error"):
+        return str(data.get("error"))[:300]
+    return ""
 
 
 def _failed(res, data):
@@ -44,8 +63,11 @@ def _apply(res, p, variables):
     note = p.get("on_failure") if failed else p.get("on_success")
     guard = p.get("guard_var")
     blocked = bool(guard and isinstance(variables, dict) and variables.get(guard))
+    refusal = _rejected(res, data) if p.get("on_rejected") and not blocked else ""
+    if refusal:
+        note = str(p.get("on_rejected")).replace("<error>", refusal)
     counter = p.get("fail_count_var")
-    if failed and counter and not blocked and isinstance(variables, dict):
+    if failed and counter and not blocked and not refusal and isinstance(variables, dict):
         try:
             n = int(variables.get(counter) or 0) + 1
         except Exception:

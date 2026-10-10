@@ -197,6 +197,36 @@ def policy_in_workflow(wf):
     return None
 
 
+def _settled_flag(tool):
+    """The flag a mark_product pre-hook raises when every product is settled, or ''."""
+    m = re.search(r'\\"settled_flag\\": \\"(\w+)\\"', str(tool.get("pre_process_code") or ""))
+    return m.group(1) if m and "# mark_product:" in str(tool.get("pre_process_code") or "") else ""
+
+
+def check_settled_closing(wf, rep):
+    """A node whose tools raise the settled flag must not hold the closing tool (it could go out with a note in one
+    message) and must have a transition on that flag (blocks.settled_transition) into a node that does."""
+    nodes = wf.get("nodes") or {}
+    every_flag = {f for n in nodes.values() for f in (_settled_flag(t) for t in n.get("tools") or []) if f}
+    closing = {t.get("target_node") for n in nodes.values() for t in n.get("transitions") or []
+               if any(f'"variable": "{f}"' in json.dumps(t.get("condition")) for f in every_flag)}
+    for k, n in nodes.items():
+        tools = n.get("tools") or []
+        flags = {f for f in (_settled_flag(t) for t in tools) if f}
+        if not flags or k in closing:    # the closing node may repeat a failed note (blocks.closing_node)
+            continue
+        where = "nodes." + k
+        closers = [t["function"]["name"] for t in tools
+                   if "call_closed" in str(t.get("post_process_code") or "") and t.get("function")]
+        if closers:
+            rep.error(where, f"has the closing tool {closers[0]!r} next to tools that settle products: it can go out in "
+                             "the same message as a note; close only in blocks.closing_node after settled_transition")
+        conds = json.dumps([t.get("condition") for t in n.get("transitions") or []])
+        for f in flags:
+            if f'"variable": "{f}"' not in conds:
+                rep.error(where, f"no transition on {f!r}: add blocks.settled_transition(<closing node>, {f!r})")
+
+
 def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
     """Payment requests must pass the offer gate (builder/blocks.offer_loop). Every path into a node that says
     {{offer_line}} must come from a gate code node; nothing else may say the line, return into it with __previous__,
@@ -390,6 +420,7 @@ def validate(wf, spec=None, call_vars=None):
         rep.warn("nodes." + k, "not reachable from initial_node")
 
     check_offer_gate(wf, rep)
+    check_settled_closing(wf, rep)
 
     if spec is not None:
         used = set()

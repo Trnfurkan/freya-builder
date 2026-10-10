@@ -20,6 +20,8 @@
 #   ledger_var, plans_var, reply_var, alt_flag_var   variable names (defaults below)
 #   line_template      e.g. "For your {product}, could you pay {amount} on {date}?" (placeholders: product, amount, date)
 #   product_labels     {product type: label template from the product's fields, e.g. "credit card ending {card_last4}"}
+#   settled_var        optional: variable with comma-separated product_ids the customer already agreed or settled
+#                      (blocks.settled_products_extraction()); an open product listed there is never asked again
 import json
 
 
@@ -49,6 +51,15 @@ def decide(vars, p):
     order = plans_all.get("order") or []
     plans = plans_all.get("plans") or dict()
     products = plans_all.get("products") or dict()
+
+    # Products the customer already agreed or settled in the working node (an extraction, settled_var): never asked
+    # again. Seen in a practice run: the customer agreed to pay the card tomorrow, the promise was not recorded yet,
+    # and the gate asked for the card twice more.
+    if p.get("settled_var"):
+        for pid in str(vars.get(p["settled_var"]) or "").replace(";", ",").replace(" ", ",").split(","):
+            pid = pid.strip()
+            if pid in order and state.get(pid, "open") == "open":
+                state[pid] = "agreed"
 
     rv = p.get("reply_var") or "offer_reply"
     reply = str(vars.get(rv) or "").strip().lower()

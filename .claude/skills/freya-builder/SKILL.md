@@ -160,6 +160,16 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   the request node that skips the gate, and any global node that returns into it with `__previous__`.
   In a practice run without the gate, the agent added an unplanned "can you pay the full amount?" before each product's
   first attempt, so a product allowed one request got two.
+  With several products, add `blocks.settled_products_extraction()` to the working node and `"settled_var":
+  "settled_products"` to `offer_gate_code`: a product the customer already agreed is never asked again (in a practice
+  run the gate asked twice more for a card the customer had agreed to pay tomorrow).
+- **When the brief needs a note for every product without a promise: close only after all are settled.** Give the
+  promise and note tools' `mark_product_code` `"settled_flag": blocks.SETTLED_FLAG`, leave the closing tool OUT of the
+  working node, add `blocks.settled_transition(<closing>)` to it and `blocks.closing_node(<closing>, <close tool>,
+  <end>, extra_tools=[<note tool>])`. Transfers keep `outcome_after`; turn caps keep `wrap_up_node`. The validator
+  rejects a closing tool next to settling tools. In a practice run close_call went out in the same message as two
+  add_note calls; the bank closed first and refused the notes. Do not use this when the brief has no such note rule
+  (Brief A style): there a refused product has no note and the flag would never rise.
 - **Persuasion plans are read, not counted.** If the brief has persuasion attempts per band, put them in
   `date_params.json` as `attempt_offers` (in order, each an amount and a date token, keys at the top of
   `builder/sandbox/date_facts.py`). Each product then gets its own plan in `product_facts`, with exactly as many
@@ -208,7 +218,12 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
     records back, so an error or a missing answer is never reported as recorded.
   - The customer never hears about errors, retries or systems; on a final failure only the brief's own sentence, said
     once and calmly, then the brief's next step. Never close the call because of a failure the brief lets you retry.
-  - The post-hook instructions still matter for answers that come back normally with `ok` false.
+  - The post-hook instructions still matter for answers that come back normally with `ok` false. Such an answer is
+    the bank's decision ("not carried out"), not a service failure: give every write tool's `post_result_code` an
+    `on_rejected=` text ("<error>" is replaced by the bank's error) that says what it said, not to repeat the same call,
+    and what to do next. A rejection is never counted as a failed attempt. In a practice run a second create_promise for
+    a recorded product got "this product already has a promise"; read as a failure, it was repeated, the attempts ran
+    out, and the call closed as service_error although the promise was recorded.
 - **Only the bank's tools.** The agent may call only the tools in the tool API file (plus ending the call). No other URLs,
   no invented tools, fields or enum values, no terms the brief does not allow.
 

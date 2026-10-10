@@ -235,6 +235,39 @@ def wrap_up_node(name, close_tool, end_target, *, task=None, tool="close_call", 
                         transitions=[closed_transition(end_target, tool)], max_turns=max_turns, max_turn_target=end_target)
 
 
+# Closing only after every product is settled ----------------------------------------------------------------------
+# Seen in a practice run (a brief that needs a note for every product without a promise): the agent sent close_call in
+# the same message as two add_note calls; the bank closed first and refused the notes. A prompt rule did not stop it.
+# So the working node has no closing tool: mark_product_code(settled_flag=...) on the promise and note tools raises the
+# flag when every product has a promise requested or a note, and only then does the call move to a closing node.
+
+SETTLED_FLAG = "all_settled"
+
+
+def settled_transition(target, flag=SETTLED_FLAG):
+    """From the working node to the closing node, once every product has a promise requested or a note."""
+    return go(target, "every product has a promise requested or a note: close the call", eq(flag, "yes"))
+
+
+def closing_node(name, close_tool, end_target, *, extra_tools=(), task=None, max_turns=6):
+    """Node entered by settled_transition: the only place with the closing tool besides wrap_up. extra_tools: e.g. the
+    note tool, to repeat a note whose result was not ok (alone, before closing)."""
+    task = task or ("Every product now has a promise or a note. If a promise or note result just now was not ok, call "
+                    "that tool again alone first and wait for its result. Otherwise, in one message: say any sentence "
+                    "a recorded promise still needs, thank the customer, say goodbye, and call close_call with the "
+                    "outcome and reason from the closing rules. close_call is the last tool call, alone.")
+    return conversation(name, task, tools=list(extra_tools) + [close_tool], on_enter=llm(task),
+                        transitions=[closed_transition(end_target)], max_turns=max_turns, max_turn_target=end_target)
+
+
+def settled_products_extraction(name="settled_products", min_confidence=0.5):
+    """Extraction for the offer gate's settled_var: products the customer already agreed or settled in the working
+    node, so the gate never asks for them again."""
+    return extract(name, "string", "Comma-separated product_ids (p1, p2, ... from the product facts) of every product "
+                   "for which the customer has already agreed an amount and a date, said it is already paid, or "
+                   "disputed it. Empty if none.", min_confidence=min_confidence)
+
+
 # Outcomes that need an earlier tool ------------------------------------------------------------------------------
 # Seen in practice runs: the agent called the closing tool with "transferred" before calling the transfer tool; the call
 # was closed and the bank refused the transfer. A prompt rule did not stop it (2 of 3 runs). So the outcome is taken

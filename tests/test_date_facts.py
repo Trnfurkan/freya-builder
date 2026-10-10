@@ -51,7 +51,8 @@ def test_products_per_product_deadline(params_a):
     assert v["deadline_p1"] == "2026-11-02"
     assert v["deadline_p2"] == "2026-10-23"
     assert v["product_count"] == "2"
-    lines = v["product_facts"].splitlines()
+    assert v["product_facts"].startswith("Several products")
+    lines = [l for l in v["product_facts"].splitlines() if l.startswith("Product ")]
     assert "product_id p1" in lines[0] and "Floor (minimum_payment) 90.00" in lines[0] and "persuasion attempts 1" in lines[0]
     assert "product_id p2" in lines[1] and "Floor (instalment_amount) 300.00" in lines[1] and "persuasion attempts 2" in lines[1]
     assert "card_last4 6604" in lines[0]
@@ -131,3 +132,38 @@ def test_product_line_points_to_its_band_table(params_a):
     prods = [{"product_id": "p1", "type": "personal_loan", "past_due": 540.0, "days_late": 5, "instalment_amount": 180.0}]
     v = facts(params_a, "2026-10-14T11:00", prods)
     assert "use band early's table" in v["product_facts"]
+
+
+OFFERS = [{"amount": "full_or_floor", "date": "end_of_week"}, {"amount": "floor", "date": "deadline"}]
+PUB12 = [{"product_id": "p1", "type": "credit_card", "card_last4": "9015", "past_due": 510.0, "days_late": 16, "minimum_payment": 153.0},
+         {"product_id": "p2", "type": "personal_loan", "past_due": 1320.0, "days_late": 16, "instalment_amount": 440.0},
+         {"product_id": "p3", "type": "car_loan", "past_due": 140.0, "days_late": 7, "instalment_amount": 46.0}]
+
+
+def test_offer_plan_per_product_follows_its_band(params_a):
+    v = facts({**params_a, "attempt_offers": OFFERS}, "2026-10-14T11:00", PUB12)
+    p2, p3 = v["offer_plan_p2"], v["offer_plan_p3"]
+    assert p2.startswith("p2 persuasion plan (2 attempts in all)")
+    assert "attempt 1 = propose 1320.00 (or the floor 440.00 if" in p2 and "on Friday 2026-10-16" in p2
+    assert "attempt 2 = propose 440.00 on Friday 2026-10-23" in p2
+    assert p3.startswith("p3 persuasion plan (1 attempt in all)") and "attempt 2" not in p3
+    assert "After attempt 1 is refused, make no more offers for p3." in p3
+    lines = v["product_facts"].splitlines()
+    assert lines[0].startswith("Several products")
+    assert lines.index("  " + p2) == lines.index([l for l in lines if "product_id p2" in l][0]) + 1
+
+
+def test_end_of_week_moves_to_next_week_and_is_capped(params_a):
+    one = [{"product_id": "p1", "type": "car_loan", "past_due": 100.0, "days_late": 3, "instalment_amount": 30.0}]
+    friday = facts({**params_a, "attempt_offers": OFFERS}, "2026-10-16T11:00", one)["offer_plan_p1"]
+    assert "on Friday 2026-10-23" in friday                       # today is this week's last business day
+    tight = {**params_a, "attempt_offers": OFFERS,
+             "bands": [{"name": "x", "min_days_late": 1, "max_days_late": 99, "deadline_business_days": 1, "attempts": 1}]}
+    capped = facts(tight, "2026-10-14T11:00", one)["offer_plan_p1"]
+    assert "on Thursday 2026-10-15" in capped                     # end of week is after the deadline: the deadline
+
+
+def test_no_plan_without_offers(params_a):
+    v = facts(params_a, "2026-10-14T11:00", PUB12[:1])
+    assert "offer_plan_p1" not in v and "persuasion plan" not in v["product_facts"]
+    assert not v["product_facts"].startswith("Several products")

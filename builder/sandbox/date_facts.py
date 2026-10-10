@@ -15,6 +15,11 @@
 #   non_business_day        what the brief says to offer for a named day that is not a business day, on or before the
 #                           deadline: "next" (next business day), "previous" (previous business day) or "" (no advice)
 #   after_deadline          what the brief says to offer for a named day after the deadline: "deadline" or "" (no advice)
+#   attempt_offers          the brief's persuasion attempts in order, each {amount, date}; a product gets as many as its
+#                           band's `attempts`. amount: "full", "floor" or "full_or_floor" (full, or the floor when the
+#                           customer already said the full amount is too much). date: "today", "next_business_day",
+#                           "end_of_week" (last business day of this week, or of next week when that is today or past),
+#                           "end_of_next_week" or "deadline". Dates later than the product's deadline become the deadline.
 #
 # Writes: date_facts, product_facts (text for prompts), today_iso, next_business_day_iso,
 #   last_business_day_this_week_iso, last_business_day_next_week_iso, deadline_<band>, deadline_<product_id>,
@@ -94,6 +99,46 @@ def _actions(today, deadline, p):
                                                  + " and offer it" if after == "deadline" else " -> cannot be recorded")
     head = "a day before today -> cannot be recorded"
     return [head] + items + [tail]
+
+
+def _offer_date(token, today, deadline, p):
+    if token == "today":
+        d = today if _is_business(today, p) else _next_business(today, p)
+    elif token == "next_business_day":
+        d = _next_business(today, p)
+    elif token == "end_of_week":
+        d = _last_business_of_week(today, p)
+        if d is None or d <= today:
+            d = _last_business_of_week(today + datetime.timedelta(days=7), p)
+    elif token == "end_of_next_week":
+        d = _last_business_of_week(today + datetime.timedelta(days=7), p)
+    else:
+        d = deadline
+    return min(d, deadline) if d is not None else deadline
+
+
+def _offer_amount(token, full, floor):
+    if token == "floor" and floor is not None:
+        return _money(floor)
+    if token == "full_or_floor" and floor is not None:
+        return _money(full) + " (or the floor " + _money(floor) + " if the customer already said the full amount is too much)"
+    return _money(full)
+
+
+def _plan(pid, attempts, offers, today, deadline, full, floor, p):
+    """The persuasion attempts for one product, worked out in full. Practice agents counted attempts wrongly per
+    product (two offers where the band allowed one), so the agent reads the plan instead of counting."""
+    n = int(attempts or 0)
+    if not offers or n <= 0:
+        return ""
+    steps = []
+    for i, o in enumerate(offers[:n]):
+        d = _offer_date(o.get("date", "deadline"), today, deadline, p)
+        steps.append("attempt " + str(i + 1) + " = propose " + _offer_amount(o.get("amount", "full"), full, floor)
+                     + " on " + _label(d))
+    return (pid + " persuasion plan (" + str(n) + " attempt" + ("s" if n != 1 else "") + " in all): "
+            + "; ".join(steps) + ". After attempt " + str(min(n, len(offers))) + " is refused, make no more offers for "
+            + pid + ".")
 
 
 def _band(days_late, p):
@@ -213,6 +258,7 @@ def _main(vars, p):
     f = p.get("product_fields") or dict()
     floors = p.get("floor_field_by_type") or dict()
     plines = []
+    plan_lines = []
     rules = dict()
     for i, prod in enumerate(products):
         pid = str(prod.get(f.get("id", "product_id"), "p" + str(i + 1)))
@@ -237,11 +283,21 @@ def _main(vars, p):
             vars["deadline_" + pid] = dl.isoformat()
             rules[pid] = dict(dates=[x.isoformat() for x in _business_days_until(today, dl, p, 400)], deadline=dl.isoformat(),
                               floor=_num(floor), full=_num(amount))
+            plan = _plan(pid, b.get("attempts"), p.get("attempt_offers"), today, dl, amount, floor, p)
+            if plan:
+                vars["offer_plan_" + pid] = plan
+                plan_lines.append("  " + plan)
         elif late is not None:
             text += ". days_late " + str(late) + " matches no band"
         plines.append(text + ".")
+        plines.extend(plan_lines)
+        plan_lines = []
     vars["product_count"] = str(len(products))
     vars["promise_rules"] = json.dumps(rules)
+    if len(products) > 1:
+        plines.insert(0, "Several products: when the customer names one date for several of them, check that date for each "
+                         "product on its own, with that product's band (allowed dates, deadline, table). A product whose "
+                         "band allows the date keeps exactly that date.")
     vars["product_facts"] = "\n".join(plines) if plines else "No product data yet."
     vars["date_facts_state"] = "ok"
 

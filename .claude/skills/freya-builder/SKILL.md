@@ -144,6 +144,11 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   a cut-off or partial answer is not a new refusal: wait for the rest instead of asking again. When attempts are counted
   per item (per product, per question), the prompt shows a separate counter for each item with its own limit taken from
   the facts ("attempts used on p3: 0 of 1"), and the agent moves to the next item when an item's limit is reached.
+- **Persuasion plans are read, not counted.** If the brief has persuasion attempts per band, put them in
+  `date_params.json` as `attempt_offers` (in order, each an amount and a date token, keys at the top of
+  `builder/sandbox/date_facts.py`). Each product then gets its own plan in `product_facts`, with exactly as many
+  attempts as its band allows. Tell the agent to follow each product's plan step by step. Practice agents made a second
+  offer on a product whose band allowed one.
 - **Named days are looked up, not reasoned about.** The date facts hold, per band, a table of the days that cannot be
   recorded and what to offer instead (`non_business_day` and `after_deadline` in `date_params.json`, from the brief).
   Tell the agent to look a named day up there and say exactly what it says. A practice agent that had the right rule in

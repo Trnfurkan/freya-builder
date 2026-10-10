@@ -31,11 +31,13 @@ def normalize_answer_code(params):
 
 
 def post_result_code(on_success="", on_failure="", when=None, *, flag_false=True, guard_var="", set_on_success=None,
-                     set_on_any=None):
+                     set_on_any=None, fail_count_var="", fail_limit=2, on_failure_final=""):
     """post_process_code: drops headers, adds `what_to_do_next` to the tool result (keys in sandbox/post_result.py)."""
     return build("post_result", {"on_success": on_success, "on_failure": on_failure, "when": when or [],
                                  "flag_false": flag_false, "guard_var": guard_var,
-                                 "set_on_success": set_on_success or {}, "set_on_any": set_on_any or {}})
+                                 "set_on_success": set_on_success or {}, "set_on_any": set_on_any or {},
+                                 "fail_count_var": fail_count_var, "fail_limit": fail_limit,
+                                 "on_failure_final": on_failure_final})
 
 
 def promise_guard_code(params):

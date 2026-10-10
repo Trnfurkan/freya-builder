@@ -106,13 +106,22 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   floors and ids. Give the model ids from the tool result, never let it make one up.
 - **Model-called tools.** Description says exactly when to call it ("CALL it ... only after ..."). One tool per message.
   After every tool result the agent speaks or calls the next tool; it never ends a turn with nothing.
+- **Order of actions.** A tool whose result decides the outcome (a transfer, a write) is called alone and its result is
+  awaited before the closing tool. Say it in both tools' descriptions; a practice agent closed the call before the transfer.
+- **Retries in code, not memory.** When the brief says "try once more, then ...", count failures in the tool's post-hook
+  (`vars`) and let the instruction say which attempt this was, instead of trusting the model to remember:
+  `post_result_code(..., fail_count_var=..., fail_limit=..., on_failure_final=...)`. The counter counts every failed
+  call of that tool; when the limit is per product, say in `on_failure` that it applies to the product just tried.
 - **Facts in prompts.** Put `{{date_facts}}`, `{{product_facts}}` and call variables into `task_message`. The model never
   computes a date, a weekday, a deadline or an amount; it picks from the facts. Tell it: a date the customer names that is
   not in the allowed list cannot be recorded, and what the brief says to offer instead.
 - **Exact phrases.** Every sentence the brief quotes is said word for word. Fixed lines go into `on_enter` `tts` text or are
   quoted in the prompt with "say exactly".
 - **Before identity is verified** nothing about the account is known to the agent. Keep account tools and account facts out
-  of those nodes. Never ask a third party the security questions.
+  of those nodes. Never ask a third party the security questions. A refusal can leak too: "I cannot accept payment from
+  you" tells a relative there is a debt. Give the agent one fixed sentence for anyone who is not the verified customer
+  (who it may speak to, and the question the brief allows) and forbid any word about money, payment, accounts, accepting
+  or refusing anything, or the reason for the call.
 - **Closing.** Read the brief's outcome table into an explicit decision list in the prompt and in the closing tool's
   description, with the brief's own precedence rules. The closing call must happen exactly once and last, after the
   farewell the brief asks for: say the farewell and call the closing tool in the same message. Where an outcome can be

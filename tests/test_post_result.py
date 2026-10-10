@@ -69,3 +69,26 @@ def test_set_variables_after_the_call():
 def test_odd_results_do_not_raise():
     assert snippets.run_post_hook(CODE, None) is None
     assert snippets.run_post_hook(CODE, "text") == "text"
+
+
+def test_failure_counter_switches_to_the_final_instruction():
+    code = snippets.post_result_code(on_success="Recorded.", on_failure="Call it once more with the same values.",
+                                     fail_count_var="promise_failures", fail_limit=2,
+                                     on_failure_final="Say you could not record it and close with service_error.",
+                                     guard_var="promise_guard")
+    v = {}
+    first = snippets.run_post_hook(code, env({"ok": False, "error": "service unavailable"}), v)
+    assert first["data"]["what_to_do_next"] == "Failed attempt 1. Call it once more with the same values."
+    second = snippets.run_post_hook(code, env({"ok": False, "error": "service unavailable"}), v)
+    assert second["data"]["what_to_do_next"] == "Say you could not record it and close with service_error."
+    assert v["promise_failures"] == 2
+
+
+def test_a_blocked_request_is_not_counted_as_a_failure():
+    code = snippets.post_result_code(on_failure="Retry.", fail_count_var="n", on_failure_final="Give up.",
+                                     guard_var="promise_guard")
+    v = {"promise_guard": "NOT RECORDED, blocked before sending: date not allowed."}
+    snippets.run_post_hook(code, env({"ok": False}), v)
+    assert "n" not in v
+    r = snippets.run_post_hook(code, env({"ok": False}), v)
+    assert v["n"] == 1 and r["data"]["what_to_do_next"] == "Failed attempt 1. Retry."

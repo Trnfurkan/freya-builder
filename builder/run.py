@@ -240,8 +240,26 @@ async def build(args, trace, raw, stderr_log):
             trace.note(f"builder agent done ({message.subtype}{', error' if message.is_error else ''}): {message.num_turns} turns, "
                        f"{message.duration_ms / 1000:.0f} s, estimated ${message.total_cost_usd or 0:.2f}")
             if message.is_error:
-                raise RuntimeError(f"builder agent ended with an error result: {message.subtype}")
+                raise RuntimeError(error_summary(message))
             print(f"\ndone: {message.num_turns} turns, {message.duration_ms / 1000:.0f} s")
+
+
+def error_summary(message):
+    """Why the builder agent stopped, from its error result. A result can say subtype "success" and still be an
+    error: in one run the builder was cut off by the Claude usage limit (API status 429) with subtype "success"."""
+    parts = [f"builder agent stopped with an error ({getattr(message, 'subtype', '')})"]
+    status = getattr(message, "api_error_status", None)
+    reason = getattr(message, "terminal_reason", None)
+    if status:
+        parts.append(f"API status {status}")
+    if reason:
+        parts.append(f"reason {reason}")
+    text = getattr(message, "result", None)
+    if text:
+        parts.append(one_line(text, 200))
+    if str(status) == "429":
+        parts.append("the Claude usage limit was reached; the saved workflow is whatever was saved before it")
+    return "; ".join(parts)
 
 
 def sdk_version():

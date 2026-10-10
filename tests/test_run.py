@@ -144,3 +144,15 @@ def test_isolation_names_end_at_shell_operators():
         assert g.decide(f"cat out/fix2-ab-20261010/rules.md{tail} echo") is None, tail
         assert g.decide(f"cat out/other{tail} echo"), tail
     assert g.decide("cat briefs/brief-c.md; echo")
+
+
+def test_error_summary_names_the_usage_limit():
+    class Msg:   # the fields of the result that ended a real build
+        subtype, is_error, api_error_status, terminal_reason = "success", True, 429, "api_error"
+        result = "You've hit your session limit, resets 7:10pm"
+    text = run.error_summary(Msg())
+    assert "API status 429" in text and "session limit" in text and "usage limit was reached" in text
+
+    class Plain:
+        subtype, is_error = "error_max_turns", True
+    assert run.error_summary(Plain()) == "builder agent stopped with an error (error_max_turns)"

@@ -13,6 +13,9 @@
 #   guard_var       variable a pre-hook filled with the reason it blocked the request; that reason wins, then it is cleared
 #   set_on_success  {variable: value} written to vars when the call worked (for routing, e.g. call_closed)
 #   set_on_any      {variable: value} written to vars after any response
+#   fail_count_var  variable that counts this tool's failed calls (a blocked guard request does not count)
+#   fail_limit      on the failure that reaches this count, on_failure_final replaces on_failure
+#   on_failure_final instruction for that last failure (for "try once more, then ..." rules)
 import json
 
 
@@ -39,6 +42,19 @@ def _apply(res, p, variables):
         data = dict(ok=False, error=str(data)[:300] if data is not None else "no response body")
         res["data"] = data
     note = p.get("on_failure") if failed else p.get("on_success")
+    guard = p.get("guard_var")
+    blocked = bool(guard and isinstance(variables, dict) and variables.get(guard))
+    counter = p.get("fail_count_var")
+    if failed and counter and not blocked and isinstance(variables, dict):
+        try:
+            n = int(variables.get(counter) or 0) + 1
+        except Exception:
+            n = 1
+        variables[counter] = n
+        if p.get("on_failure_final") and n >= int(p.get("fail_limit") or 2):
+            note = p.get("on_failure_final")
+        elif note:
+            note = "Failed attempt " + str(n) + ". " + note
     for rule in p.get("when") or []:
         try:
             field, value, text = rule[0], rule[1], rule[2]
@@ -51,8 +67,7 @@ def _apply(res, p, variables):
         falses = [k for k, v in data.items() if k != "ok" and str(v).lower() == "false"]
         if falses:
             note = "Result: " + ", ".join(k + " is FALSE" for k in falses) + ". " + (note or "")
-    guard = p.get("guard_var")
-    if guard and isinstance(variables, dict) and variables.get(guard):
+    if blocked:
         note = str(variables.get(guard)) + " This is not a service failure and does not count as a failed attempt. " \
             + "Tell the customer what can be recorded instead, following your rules, and read it back before trying again."
         variables[guard] = ""

@@ -350,10 +350,11 @@ def offer_loop(gate_name, say_name, back_node, gate_code, *, reply_var="offer_re
 # the customer says something else, and when the walk is done (offer_summary lists what was agreed and refused).
 
 WALK_REPLY = ("The customer's answer to the payment request just made, about this product only: accepted (agrees to "
-              "exactly that amount and date); too_much (says in so many words that this amount is too high, too much or "
+              "exactly that amount and date); own_terms (agrees to pay this product on a day or with an amount they name "
+              "themselves, for example 'I will pay it tomorrow', 'I can pay it on the 30th', even when they said it "
+              "before); too_much (says in so many words that this amount is too high, too much or "
               "more than they can afford); refused (says no, will not or cannot pay, without saying the amount is too "
-              "high and without proposing anything: a plain no is refused, never too_much); other (proposes their own "
-              "date or amount, asks a question, hesitates, or mentions illness, job loss, a death, a dispute, a payment "
+              "high and without proposing anything: a plain no is refused, never too_much); other (asks a question, hesitates, or mentions illness, job loss, a death, a dispute, a payment "
               "already made, a new plan, a human, or anything else).")
 
 
@@ -371,9 +372,11 @@ def offer_walk(gate_name, say_name, back_node, gate_code, *, done_target=None, r
             "repeat the request word for word.")
     request = conversation(
         say_name, task, on_enter=say(OFFER_LINE),
-        extraction=[extract(reply_var, "string", WALK_REPLY, enum=["accepted", "too_much", "refused", "other"],
+        extraction=[extract(reply_var, "string", WALK_REPLY, enum=["accepted", "own_terms", "too_much", "refused", "other"],
                             min_confidence=0.6)],
         transitions=[go(gate_name, "the customer accepted the request: the gate records it and goes on", eq(reply_var, "accepted")),
+                     go(gate_name, "the customer named their own day or amount: the gate marks it agreed and goes on",
+                        eq(reply_var, "own_terms")),
                      go(gate_name, "the amount is too much for this product: the gate decides", eq(reply_var, "too_much")),
                      go(gate_name, "the customer refused: the gate decides the next request, if any", eq(reply_var, "refused")),
                      go(back_node, "the customer said something else", eq(reply_var, "other"))],

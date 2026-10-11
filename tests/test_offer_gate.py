@@ -97,7 +97,7 @@ def test_each_product_gets_requests_up_to_its_band_limit():
     assert made[0] == ("p1", "For your credit card ending 9015, could you pay 510.00 on Friday 2026-10-16?")
     assert made[1] == ("p1", "For your credit card ending 9015, could you pay 153.00 on Friday 2026-10-23?")
     assert made[4] == ("p3", "For your car loan, could you pay 140.00 on Friday 2026-10-16?")
-    assert "used for: p1, p2, p3" in v["offer_summary"]
+    assert all("(" + pid + ")" in v["offer_summary"].split("used for:")[1] for pid in ("p1", "p2", "p3"))
 
 
 def test_one_request_more_is_blocked_whatever_the_path():

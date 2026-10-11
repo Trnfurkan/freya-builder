@@ -77,6 +77,13 @@ def decide(vars, p):
     if cur and reply == "accepted":
         state[cur] = "agreed"
         ledger.setdefault("agreed", dict())[cur] = ledger.get("step") or dict()   # the request's own amount and date
+    elif cur and reply == "own_terms":
+        # The customer named their own day or amount for this product: agreed on their terms. The walk goes on to the
+        # next product; the terms are read back and checked by the promise guard when they are recorded. Seen in a
+        # practice run (fix18-ab): "I will pay the card tomorrow" went to the working node, which then asked for the
+        # loans itself.
+        state[cur] = "agreed"
+        ledger.setdefault("agreed", dict())[cur] = dict(own_terms=True)
     elif cur and reply == "too_much":
         # The customer said this product's full amount is too much: remembered for this product only. Its next
         # attempt, if the plan has one left, uses the floor where the brief's offer allows it (full_or_floor).
@@ -122,9 +129,16 @@ def decide(vars, p):
         vars["offer_product"] = ""
         vars["offer_state"] = "done"
         terms = ledger.get("agreed") or dict()
-        agreed = [pid + (" (" + str(terms[pid].get("amount", "")) + " on " + str(terms[pid].get("date", "")) + ")"
-                         if terms.get(pid) else " (as the customer said)")
+
+        def _name(pid):
+            prod = products.get(pid) or dict()
+            lt = (p.get("product_labels") or dict()).get(prod.get("type", ""), "") or str(prod.get("type", pid)).replace("_", " ")
+            return _fill(lt, prod) + " (" + pid + ")"
+
+        agreed = [_name(pid) + (": " + str(terms[pid].get("amount", "")) + " on " + str(terms[pid].get("date", ""))
+                                if terms.get(pid) and terms[pid].get("date") else ": on the terms the customer said in this call")
                   for pid in order if state.get(pid) == "agreed"]
+        used = [_name(pid) for pid in used]
         vars["offer_summary"] = ("No payment request is allowed now. Agreed: " + (", ".join(agreed) if agreed else "none")
                                  + ". All persuasion attempts are used for: " + (", ".join(used) if used else "none")
                                  + ". Make no further request for any product; go on with the read-back, the records "

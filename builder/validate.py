@@ -169,6 +169,7 @@ GATE_MARK = "# offer_gate:"
 MARK_MARK = "# mark_product:"
 POSITION_MARK = "# mark_position:"
 WALK_FLAG = '\\"walk\\": true'
+FACT_VARS = ("product_facts", "date_facts", "date_lookup", "offer_plan", "date_actions", "promise_rules")
 
 
 def _codes(node):
@@ -365,6 +366,21 @@ def check_walk(wf, rep, every, gates, say_nodes):
                 rep.error("nodes." + g, f"after the walk is done (to {start!r}) the call can reach {hit}, which can "
                                         "make a new payment request: send done to blocks.records_node, which has no "
                                         "way back")
+            for k in sorted(seen):
+                n = nodes.get(k) or {}
+                oe = n.get("on_enter") or {}
+                text = " ".join(str(x or "") for x in (n.get("task_message"), n.get("loop_prompt"), n.get("role_message"),
+                                                       oe.get("prompt"), oe.get("text")))
+                shown = [v for v in FACT_VARS if "{{" + v in text]
+                if shown:
+                    rep.error("nodes." + k, f"after the walk is done the model here sees {shown}: amounts, floors and "
+                                            "deadlines are enough to make up a new request (fix18-ab: the records node "
+                                            "asked for the car loan's floor on its deadline); give it only {{offer_summary}}")
+    if walk_gates:
+        shown = [v for v in FACT_VARS if "{{" + v in str(wf.get("system_prompt") or "")]
+        if shown:
+            rep.error("workflow", f"the system prompt shows {shown} to every node, including the records node after the "
+                                  "walk: keep facts in the working node's task only")
     closers = {k for k, n, _ in every if any("call_closed" in str(x.get("post_process_code") or "")
                                              for x in n.get("tools") or [])}
     walk_feeding = [k for k in feeding if any(t.get("target_node") in walk_gates for t in nodes[k].get("transitions") or [])]

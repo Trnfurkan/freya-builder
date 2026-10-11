@@ -182,7 +182,12 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   transition (transfers keep `outcome_after`, turn caps `wrap_up_node`). The records node is the only way to a
   normal close; it has no way back to any request (fix17-ab: when the gate's done went back to the working node, it
   made up a new car loan offer). The request node's answers include `too_much`, kept per product by the gate; do not
-  add a call-wide "full amount is too much" extraction in the walk (fix17-ab: it turned yes on a plain no). The gate goes through the
+  add a call-wide "full amount is too much" extraction in the walk (fix17-ab: it turned yes on a plain no). The answers
+  also include `own_terms` ("I will pay it tomorrow"): the gate marks that product agreed and goes on, so the working
+  node is not entered (fix18-ab: it was, and asked for the loans itself). Leave the records node's default task: it
+  sees only `{{offer_summary}}` (product names, agreed amounts and dates, refused products). Never put
+  `{{product_facts}}`, `{{date_facts}}` or other facts into the records node or the system prompt: the validator
+  rejects it (fix18-ab: with the facts the records node asked for the car loan's floor on its deadline). The gate goes through the
   products by itself in get_account order: it counts every request before it is said, answers "accepted" and
   "refused" go back into the gate (never to the working node), it records an accepted request's amount and date, and
   moves on to the next open product. The working node is entered only for other answers and when the walk is done

@@ -125,8 +125,8 @@ def test_5_refusal_hesitation_correction_and_return():
     assert led(v)["state"]["p2"] == "agreed" and led(v)["agreed"]["p2"]["date"]
     assert (state, pid) == ("offer", "p3")              # the walk goes on by itself, never back to p2
     state, _ = enter_gate(v, "refused")
-    assert state == "done" and "p2 (" + led(v)["agreed"]["p2"]["amount"] in v["offer_summary"]
-    assert "used for: p3" in v["offer_summary"]
+    assert state == "done" and "personal loan (p2): " + led(v)["agreed"]["p2"]["amount"] in v["offer_summary"]
+    assert "used for: car loan (p3)" in v["offer_summary"]
     assert enter_gate(v) == ("done", "")                # returning to the gate after a tool call asks nothing new
 
 
@@ -190,7 +190,7 @@ def test_the_walk_validates_and_answers_go_into_the_gate():
     errors, warnings = report(wf)
     assert errors == []
     req = wf["nodes"]["offer_request"]
-    assert [t["target_node"] for t in req["transitions"]] == ["offer_gate", "offer_gate", "offer_gate", "negotiate"]
+    assert [t["target_node"] for t in req["transitions"]] == ["offer_gate"] * 4 + ["negotiate"]
     assert any("not provable from the graph" in w for w in warnings)   # the model's free text is reported, not hidden
     assert all(wf["nodes"][f"mark_agreed_{k}"]["passthrough_default_transition"] == "negotiate" for k in (1, 2, 3))
 
@@ -302,7 +302,7 @@ def test_too_much_uses_the_floor_when_the_plan_allows_it():
 def test_the_reply_classes_keep_a_plain_no_out_of_too_much():
     req = walk_workflow()["nodes"]["offer_request"]
     e = req["extraction_schema"][0]
-    assert e["enum_values"] == ["accepted", "too_much", "refused", "other"]
+    assert e["enum_values"] == ["accepted", "own_terms", "too_much", "refused", "other"]
     assert "a plain no is refused, never too_much" in e["description"]
 
 
@@ -312,7 +312,8 @@ def test_card_agreed_then_both_loans_refused_gives_the_records_summary():
     mark(v, 1)
     assert refuse_everything(v) == ["p2", "p2", "p3"]
     summary = v["offer_summary"]
-    assert "Agreed: p1 (as the customer said)" in summary and "used for: p2, p3" in summary
+    assert "Agreed: credit card ending 9015 (p1): on the terms the customer said in this call" in summary
+    assert "used for: personal loan (p2), car loan (p3)" in summary
 
 
 def test_no_early_close_from_the_working_node():
@@ -332,3 +333,29 @@ def test_closing_and_records_have_speakable_content():
         assert oe["type"] == "llm" and oe["prompt"].strip()
     wf["nodes"]["closing"]["on_enter"]["prompt"] = ""
     assert any("on_enter llm without a prompt" in m for m in report(wf)[0])
+
+
+# --- fix18-ab: own terms go into the gate; nothing after done sees the facts -----------------------------------
+
+def test_own_terms_mark_the_product_and_the_walk_goes_on():
+    """PUB-12 (fix18-ab): asked for the card, the customer said "I will pay the credit card tomorrow"."""
+    v = start()
+    assert enter_gate(v) == ("offer", "p1")
+    state, pid = enter_gate(v, "own_terms")
+    assert led(v)["state"]["p1"] == "agreed" and led(v)["agreed"]["p1"] == {"own_terms": True}
+    assert (state, pid) == ("offer", "p2")                              # never back to the working node, never p1 again
+    while state == "offer":
+        state, pid = enter_gate(v, "refused")
+    assert led(v)["counts"] == {"p1": 1, "p2": limit("PUB-12", "p2"), "p3": limit("PUB-12", "p3")}
+    assert "credit card ending 9015 (p1): on the terms the customer said in this call" in v["offer_summary"]
+
+
+def test_validator_rejects_facts_in_the_records_node():
+    """fix18-ab: the records node's prompt held {{product_facts}}; it asked for the car loan's floor on its deadline."""
+    wf = walk_workflow()
+    wf["nodes"]["records"]["task_message"] += " Account facts: {{product_facts}}"
+    assert any("after the walk is done the model here sees ['product_facts']" in m for m in report(wf)[0])
+    wf = walk_workflow()
+    wf["system_prompt"] = "Facts: {{date_facts}}"
+    assert any("the system prompt shows ['date_facts']" in m for m in report(wf)[0])
+    assert report(walk_workflow())[0] == []

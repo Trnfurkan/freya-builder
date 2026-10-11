@@ -29,6 +29,9 @@
 #                      product only), kept per product in the ledger; alt_flag_var is not used. Seen in a practice
 #                      run (fix17-ab): one call-wide "full amount is too much" extraction turned yes on a plain no, and
 #                      every product got its floor as attempt 1.
+#   floor_counter_offer  true when the brief offers the floor once after "the full amount is too much" (Brief A rule
+#                      26): the gate then says floor_line_template (product, amount, date) on the same date, once per
+#                      product, without counting it as a persuasion attempt.
 #   settled_var        optional: variable with comma-separated product_ids the customer already agreed or settled
 #                      (blocks.settled_products_extraction()); an open product listed there is never asked again
 import json
@@ -85,9 +88,26 @@ def decide(vars, p):
         state[cur] = "agreed"
         ledger.setdefault("agreed", dict())[cur] = dict(own_terms=True)
     elif cur and reply == "too_much":
-        # The customer said this product's full amount is too much: remembered for this product only. Its next
-        # attempt, if the plan has one left, uses the floor where the brief's offer allows it (full_or_floor).
+        # The customer said this product's full amount is too much: remembered for this product only.
         ledger.setdefault("too_much", dict())[cur] = True
+        step = ledger.get("step") or dict()
+        offered = ledger.setdefault("floor_offered", dict())
+        if p.get("floor_counter_offer") and step.get("floor") and not offered.get(cur):
+            # The brief's counter-offer (Brief A rule 26: "offer the floor, once. Say that the rest stays overdue"):
+            # the floor on the same date, once per product, not a persuasion attempt. Seen in a practice run
+            # (fix21-a PUB-06): taken as the next attempt, the floor went out on the deadline without the note.
+            offered[cur] = True
+            prod = products.get(cur) or dict()
+            label_t = (p.get("product_labels") or dict()).get(prod.get("type", ""), "") or str(prod.get("type", cur)).replace("_", " ")
+            line_t = p.get("floor_line_template") or ("For your {product}, could you pay {amount} on {date}? "
+                                                      "The rest of the past-due amount stays overdue.")
+            vars["offer_line"] = _fill(line_t, dict(product=_fill(label_t, prod), amount=step["floor"],
+                                                    date=step.get("date_label", "")))
+            vars["offer_product"] = cur
+            vars["offer_state"] = "offer"
+            ledger["step"] = dict(amount=step["floor"], date=step.get("date", ""), date_label=step.get("date_label", ""))
+            vars[lv] = json.dumps(ledger)
+            return
         if int(counts.get(cur, 0)) >= len(plans.get(cur) or []):
             state[cur] = "refused"
     elif cur and reply == "refused" and int(counts.get(cur, 0)) >= len(plans.get(cur) or []):
@@ -113,16 +133,21 @@ def decide(vars, p):
             too_much = bool((ledger.get("too_much") or dict()).get(pick))
         else:
             too_much = str(vars.get(p.get("alt_flag_var") or "full_too_much") or "").lower() == "yes"
+        line_t = p.get("line_template") or "For your {product}, could you pay {amount} on {date}?"
         if step.get("alt_amount") and too_much:
             amount = step.get("alt_amount")
+            if p.get("floor_counter_offer"):     # the floor with the brief's note, and it counts as the floor offer
+                line_t = p.get("floor_line_template") or ("For your {product}, could you pay {amount} on {date}? "
+                                                          "The rest of the past-due amount stays overdue.")
+                ledger.setdefault("floor_offered", dict())[pick] = True
         prod = products.get(pick) or dict()
         label_t = (p.get("product_labels") or dict()).get(prod.get("type", ""), "") or str(prod.get("type", pick)).replace("_", " ")
-        line_t = p.get("line_template") or "For your {product}, could you pay {amount} on {date}?"
         vars["offer_line"] = _fill(line_t, dict(product=_fill(label_t, prod), amount=amount, date=step.get("date_label", "")))
         vars["offer_product"] = pick
         vars["offer_state"] = "offer"
         ledger["current"] = pick
-        ledger["step"] = dict(amount=amount, date=step.get("date", ""))
+        ledger["step"] = dict(amount=amount, date=step.get("date", ""), date_label=step.get("date_label", ""),
+                              floor=step.get("alt_amount") or "")
     else:
         used = [pid for pid in order if int(counts.get(pid, 0)) >= len(plans.get(pid) or []) and state.get(pid, "open") in ("open", "refused")]
         vars["offer_line"] = ""

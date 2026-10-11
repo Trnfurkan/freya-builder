@@ -437,6 +437,23 @@ def agreed_marks(max_products, back_node, snippets, *, prefix="mark_agreed_"):
     return nodes, transitions
 
 
+def too_much_marks(max_products, gate_name, snippets, *, prefix="mark_too_much_"):
+    """For each product position k: a code node that records in the offer ledger that the customer said product k's
+    full amount is too much, then goes straight into the offer gate, and the tool-call transition the working node
+    takes for it. With offer_gate_code({..., "floor_counter_offer": True}) the gate's next request for that product is
+    the floor with the brief's note, once. Seen in a practice run (fix21-a PUB-06): "the full amount is too much" said
+    to the first question never reached the gate; the floor went out on the deadline without the note."""
+    nodes, transitions = [], []
+    for k in range(1, int(max_products) + 1):
+        name = f"{prefix}{k}"
+        nodes.append(code_node(name, snippets.build("mark_position", {"product_index": k, "mark": "too_much"}), gate_name))
+        when = (f"The customer said the full past-due amount of product number {k} (Product {k} in the product facts) "
+                "is too much for them: the offer gate makes the next request.")
+        transitions.append({"target_node": name, "description": when, "is_tool_call": True,
+                            "condition": {"operator": "matches_intent", "description": when}})
+    return nodes, transitions
+
+
 def product_offer_loops(max_products, back_node, gate_code_for, *, gate_prefix="offer_gate_",
                         say_prefix="offer_request_", reply_var="offer_reply"):
     """One gate and one request node per product position (1..max_products, the brief's most products per customer).

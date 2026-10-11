@@ -381,3 +381,66 @@ def test_records_node_closes_after_the_promise_in_a_one_product_brief():
     assert rec["transitions"][-1]["is_tool_call"]
     plain = b.records_node("records", [promise], "closing")
     assert len(plain["transitions"]) == 1                     # several products: notes first, so no shortcut
+
+
+# --- fix21-a PUB-06: "the full amount is too much" -> the floor once, same date, with the note (Brief A rule 26) ---
+
+FLOOR_WALK = snippets.offer_gate_code({"line_template": "For your {product}, could you pay {amount} on {date}?",
+                                       "product_labels": {"credit_card": "credit card ending {card_last4}"},
+                                       "walk": True, "floor_counter_offer": True})
+
+
+def floor_gate(v, reply=None):
+    if reply is not None:
+        v["offer_reply"] = reply
+    exec(FLOOR_WALK, {"vars": v})
+    return v["offer_state"], v.get("offer_product", "")
+
+
+def test_pub06_too_much_said_before_the_walk_gets_the_floor_on_friday_with_the_note():
+    want = CASES["PUB-06"]["expected"]["promises"][0]                   # 637.5 on 2026-10-16 in the practice customer
+    v = start("PUB-06")
+    exec(snippets.build("mark_position", {"product_index": 1, "mark": "too_much"}), {"vars": v})
+    assert floor_gate(v) == ("offer", "p1")
+    assert "%.2f" % want["amount"] in v["offer_line"] and want["date"] in v["offer_line"]
+    assert "stays overdue" in v["offer_line"]
+    assert led(v)["counts"]["p1"] == 1                                  # it is attempt 1 (rule 30: the floor if too much)
+    floor_gate(v, "accepted")
+    assert led(v)["agreed"]["p1"]["amount"] == "%.2f" % want["amount"] and led(v)["agreed"]["p1"]["date"] == want["date"]
+
+
+def test_too_much_answered_to_a_request_gets_the_floor_once_on_the_same_date_uncounted():
+    v = start("PUB-06")
+    floor_gate(v)
+    first = dict(led(v)["step"])
+    assert floor_gate(v, "too_much") == ("offer", "p1")
+    assert first["floor"] in v["offer_line"] and first["date"] in v["offer_line"] and "stays overdue" in v["offer_line"]
+    assert led(v)["counts"]["p1"] == 1                                  # the counter-offer is not a persuasion attempt
+    state, _ = floor_gate(v, "too_much")                                # said again: no second floor counter-offer
+    assert led(v)["floor_offered"] == {"p1": True}
+    assert led(v)["counts"]["p1"] <= limit("PUB-06", "p1")
+
+
+def test_too_much_on_an_early_band_product_still_gets_the_floor_once():
+    v = start("PUB-12")
+    mark(v, 1)
+    mark(v, 2)
+    assert floor_gate(v) == ("offer", "p3")
+    assert floor_gate(v, "too_much") == ("offer", "p3")                 # rule 26 applies in every band
+    assert led(v)["counts"]["p3"] == limit("PUB-12", "p3") == 1
+    assert floor_gate(v, "refused") == ("done", "")                     # refusing the floor is a flat refusal, none left
+
+
+def test_too_much_marks_go_into_the_gate():
+    nodes, transitions = b.too_much_marks(3, "offer_gate", snippets)
+    assert [n["passthrough_default_transition"] for n in nodes] == ["offer_gate"] * 3
+    assert all(t["is_tool_call"] for t in transitions)
+
+
+def test_a_walk_with_too_much_marks_validates():
+    wf = walk_workflow()
+    tm_nodes, tm_trans = b.too_much_marks(3, "offer_gate", snippets)
+    wf["nodes"]["negotiate"]["transitions"] += tm_trans
+    for n in tm_nodes:
+        wf["nodes"][n["name"]] = n
+    assert report(wf)[0] == []

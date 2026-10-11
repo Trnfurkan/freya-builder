@@ -191,7 +191,13 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   With one product and no note rule (Brief A style) give the records node `close_after="create_promise"`: it moves to
   closing as soon as the promise answered ok true or failed twice (fix20-a: without it the records node said goodbye
   until its turn cap and close_call came too late or never). With a note rule leave it out: the notes come first.
-  Never edit the snippets' comments to quiet the validator: it recognises the closing tool by its hook's parameters. The gate goes through the
+  Never edit the snippets' comments to quiet the validator: it recognises the closing tool by its hook's parameters.
+  When the brief offers the floor once after "the full amount is too much" (Brief A rule 26), set
+  `"floor_counter_offer": True` (and `floor_line_template` with the brief's note, e.g. "... The rest stays overdue.")
+  in the gate, and add `tm_nodes, tm_trans = blocks.too_much_marks(<most products>, "offer_gate", snippets)`: the
+  working node takes the transition for product k when the customer says its full amount is too much, and the gate
+  then offers that product's floor on its attempt date with the note, once (fix21-a PUB-06: the floor went out on the
+  deadline without the note, 0 of 3). The gate goes through the
   products by itself in get_account order: it counts every request before it is said, answers "accepted" and
   "refused" go back into the gate (never to the working node), it records an accepted request's amount and date, and
   moves on to the next open product. The working node is entered only for other answers and when the walk is done

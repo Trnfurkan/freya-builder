@@ -7,7 +7,7 @@
 # runs (fix13-ab): pre-hooks of two tool calls sent in one message both rewrote the ledger and one write was lost.
 # It never touches the request counts, and it only moves an "open" product: a refused or settled one stays as it is.
 #
-# PARAMS keys: product_index (1-based), ledger_var (default "offer_ledger"), plans_var (default "offer_plans")
+# PARAMS keys: product_index (1-based), mark ("agreed", the default, or "too_much"), ledger_var (default "offer_ledger"), plans_var (default "offer_plans")
 import json
 
 
@@ -29,7 +29,9 @@ try:
         _led.setdefault("counts", dict())
         _st = _led.setdefault("state", dict())
         _led.setdefault("current", "")
-        if _st.get(_pid, "open") == "open":
+        if PARAMS.get("mark") == "too_much":     # the customer said this product's full amount is too much
+            _led.setdefault("too_much", dict())[_pid] = True
+        elif _st.get(_pid, "open") == "open":
             _st[_pid] = "agreed"
         vars[_lv] = json.dumps(_led)
 except Exception:

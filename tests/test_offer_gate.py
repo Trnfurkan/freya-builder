@@ -218,11 +218,12 @@ def gated(openapi):
     close = ot.api_tool(openapi, "close_call", baked=cid, post_hook=b.close_post_hook(snippets))
     promise = ot.api_tool(openapi, "create_promise", baked=cid, pre_hook=PROMISE_HOOK)
     note = ot.api_tool(openapi, "add_note", baked=cid, pre_hook=snippets.mark_product_code({"state": "noted"}))
-    work = b.conversation("negotiate", "{{product_facts}}", tools=[promise, note, close],
-                          transitions=[b.closed_transition("end"), b.to_gate("offer_gate")],
+    work = b.conversation("negotiate", "{{product_facts}}", tools=[promise, note],
+                          transitions=[b.ready_to_close("closing"), b.to_gate("offer_gate")],
                           max_turns=60, max_turn_target="wrap_up")
     nodes = [b.code_node("facts", snippets.date_facts_code(POLICY), "negotiate"), work,
              *b.offer_loop("offer_gate", "offer_request", "negotiate", GATE),
+             b.closing_node("closing", close, "end"),
              b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")]
     robot = b.global_node("robot", {"operator": "matches_intent", "description": "asks if it is a robot"},
                           "Say what you are.", on_enter=b.say("I am a digital assistant."),

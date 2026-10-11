@@ -253,14 +253,37 @@ def settled_transition(target, flag=SETTLED_FLAG):
 
 
 def closing_node(name, close_tool, end_target, *, extra_tools=(), task=None, max_turns=6):
-    """Node entered by settled_transition: the only place with the closing tool besides wrap_up. extra_tools: e.g. the
-    note tool, to repeat a note whose result was not ok (alone, before closing)."""
+    """Node entered by ready_to_close (recommended, no extra tools) or settled_transition: the only place with the
+    closing tool besides wrap_up and outcome_after. extra_tools only with settled_transition (not recommended)."""
+    if task is None and not extra_tools:
+        task = CLOSING_TASK
     task = task or ("Every product now has a promise or a note. If a promise or note result just now was not ok, call "
                     "that tool again alone first and wait for its result. Otherwise, in one message: say any sentence "
                     "a recorded promise still needs, thank the customer, say goodbye, and call close_call with the "
                     "outcome and reason from the closing rules. close_call is the last tool call, alone.")
     return conversation(name, task, tools=list(extra_tools) + [close_tool], on_enter=llm(task),
                         transitions=[closed_transition(end_target)], max_turns=max_turns, max_turn_target=end_target)
+
+
+# Closing through a "ready to close" transition (no shared variables) ---------------------------------------------
+# Seen in practice runs (fix14-ab, 4 of 30 calls): close_call went out in the same message as add_note; the bank closed
+# first and the note was refused. The settled flag above failed live (parallel pre-hooks lose writes), so here nothing
+# depends on variables: the working node has no closing tool at all. The model takes a tool-call transition when it is
+# done; a note sent in that same message is already on its way, and close_call exists only in the next node.
+
+READY_TO_CLOSE = ("Every product has its recorded promise or its note and every one of those results has come back ok "
+                  "(or nothing is left to do by the closing rules): move on to close the call.")
+
+
+def ready_to_close(target, when=READY_TO_CLOSE):
+    """Tool-call transition from the working node to the closing node (closing_node with no extra tools)."""
+    return {"target_node": target, "description": when, "is_tool_call": True,
+            "condition": {"operator": "matches_intent", "description": when}}
+
+
+CLOSING_TASK = ("All work is done. In one message: say any sentence the rules still require that you have not said yet "
+                "(for example the sentence after a recorded promise), thank the customer, say goodbye, and call "
+                "close_call alone with the outcome and reason from the closing rules. Call no other tool.")
 
 
 def settled_products_extraction(name="settled_products", min_confidence=0.5):
@@ -316,6 +339,26 @@ def offer_loop(gate_name, say_name, back_node, gate_code, *, reply_var="offer_re
                      go(back_node, "the customer said something else", eq(reply_var, "other"))],
         max_turns=max_turns, max_turn_target=back_node)
     return [gate, request]
+
+
+def product_offer_loops(max_products, back_node, gate_code_for, *, gate_prefix="offer_gate_",
+                        say_prefix="offer_request_", reply_var="offer_reply"):
+    """One gate and one request node per product position (1..max_products, the brief's most products per customer).
+    gate_code_for(k) returns the gate code for position k, e.g.
+        lambda k: snippets.offer_gate_code({..., "product_index": k}).
+    Returns (nodes, transitions): add the nodes to the workflow and the transitions (product_to_gate) to the working
+    node. Each gate asks only for its own product, so a refusal of product 2 can never produce a request for product 1."""
+    nodes, transitions = [], []
+    for k in range(1, int(max_products) + 1):
+        nodes += offer_loop(f"{gate_prefix}{k}", f"{say_prefix}{k}", back_node, gate_code_for(k), reply_var=reply_var)
+        transitions.append(product_to_gate(f"{gate_prefix}{k}", k))
+    return nodes, transitions
+
+
+def product_to_gate(gate_name, k):
+    """Tool-call transition into the gate for product number k (get_account order, as numbered in product_facts)."""
+    return to_gate(gate_name, when=f"The customer refused to pay product number {k} (Product {k} in the product facts) "
+                                   "with no date and no amount, and a persuasion attempt for that product may follow.")
 
 
 def to_gate(gate_name, when="The customer refused to pay (no date, no amount) and a persuasion attempt may follow."):

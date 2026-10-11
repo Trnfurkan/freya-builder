@@ -8,7 +8,7 @@ from builder import openapi_tools as ot
 from builder import snippets
 from builder.validate import validate
 from tests.conftest import KIT, no_attempts
-from tests.test_offer_gate import GATE, account, call_vars, gate, ledger
+from tests.test_offer_gate import GATE, POLICY, account, call_vars, gate, ledger
 
 OPENAPI = json.loads((KIT / "tools" / "openapi.json").read_text(encoding="utf-8"))
 CID = {"customer_id": "{{customer_id}}"}
@@ -103,14 +103,40 @@ def _errors(wf):
     return [m for lvl, _, m in validate(wf, OPENAPI).items if lvl == "ERROR"]
 
 
-def test_closing_pattern_validates_and_the_closing_tool_is_not_in_the_working_node():
+def test_settled_flag_closing_with_a_note_tool_is_now_rejected():
+    """The settled-flag pattern failed live (fix13-ab); its closing node also holds a note tool next to close_call."""
     promise = ot.api_tool(OPENAPI, "create_promise", baked=CID, pre_hook=PROMISE_MARK)
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=NOTE_MARK)
     wf = _workflow(_negotiate([promise, note], [b.settled_transition("closing")]))
+    assert any("a note tool and the closing tool together" in m for m in _errors(wf))
+
+
+# --- closing through a ready-to-close transition (fix14-ab: close_call sent with add_note in 4 of 30 calls) ------
+
+def _ready_workflow(work_tools):
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    work = _negotiate(work_tools, [b.ready_to_close("closing")])
+    return b.workflow("negotiate", [work, b.closing_node("closing", close, "end"),
+                                    b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")])
+
+
+def test_ready_to_close_pattern_validates_and_keeps_close_call_away_from_notes():
+    promise = ot.api_tool(OPENAPI, "create_promise", baked=CID)
+    note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=snippets.mark_product_code({"state": "noted"}))
+    wf = _ready_workflow([promise, note])
     assert _errors(wf) == []
-    closing = wf["nodes"]["closing"]
-    assert [t["function"]["name"] for t in closing["tools"]] == ["add_note", "close_call"]
-    assert closing["transitions"][0]["target_node"] == "end"
+    work, closing = wf["nodes"]["negotiate"], wf["nodes"]["closing"]
+    assert "close_call" not in [t["function"]["name"] for t in work["tools"]]
+    assert [t["function"]["name"] for t in closing["tools"]] == ["close_call"]     # nothing to send with it
+    assert work["transitions"][0]["is_tool_call"] and work["transitions"][0]["target_node"] == "closing"
+    assert closing["on_enter"]["type"] == "llm" and "Call no other tool" in closing["task_message"]
+
+
+def test_validator_rejects_a_note_tool_next_to_close_call():
+    note = ot.api_tool(OPENAPI, "add_note", baked=CID)
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    wf = _ready_workflow([note, close])
+    assert any("a note tool and the closing tool together" in m for m in _errors(wf))
 
 
 def test_validator_rejects_close_call_next_to_settling_tools():
@@ -156,3 +182,49 @@ def test_gate_without_settled_var_behaves_as_before():
 def test_settled_products_extraction_block():
     e = b.settled_products_extraction()
     assert e["name"] == "settled_products" and "min_confidence" in e
+
+
+# --- one gate per product position (fix14-ab PUB-12: 3-4 requests on the personal loan where 2 were allowed) ------
+
+def _gate_code(k):
+    return snippets.offer_gate_code({"line_template": "For your {product}, could you pay {amount} on {date}?",
+                                     "product_index": k})
+
+
+def _ask(v, k, reply=None):
+    if reply is not None:
+        v["offer_reply"] = reply
+    exec(_gate_code(k), {"vars": v})
+    return v["offer_state"], v.get("offer_product", "")
+
+
+def test_a_gate_asks_only_for_its_own_product():
+    """PUB-12: the customer agreed the card (p1) and refused both loans. Brief A rule 30 via Brief B rule 5: the late
+    personal loan (p2) gets 2 requests, the early car loan (p3) 1, the card none."""
+    v = call_vars("PUB-12")
+    asked = {}
+    for k in (2, 3):
+        state, pid = _ask(v, k)
+        while state == "offer":
+            asked[pid] = asked.get(pid, 0) + 1
+            state, pid = _ask(v, k, "refused")
+    assert asked == {"p2": 2, "p3": 1}
+    assert "p1" not in ledger(v)["counts"]
+
+
+def test_a_gate_for_a_missing_product_asks_nothing():
+    v = call_vars("PUB-07")                                                 # one product
+    assert _ask(v, 2) == ("done", "")
+
+
+def test_product_gates_validate_in_a_workflow():
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=snippets.mark_product_code({"state": "noted"}))
+    gates, to_gates = b.product_offer_loops(3, "negotiate", _gate_code)
+    work = _negotiate([note], [b.ready_to_close("closing"), *to_gates])
+    facts = b.code_node("facts", snippets.date_facts_code(POLICY), "negotiate")
+    wf = b.workflow("facts", [facts, work, *gates, b.closing_node("closing", close, "end"),
+                              b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")])
+    assert _errors(wf) == []
+    assert [t["target_node"] for t in work["transitions"][1:]] == ["offer_gate_1", "offer_gate_2", "offer_gate_3"]
+    assert wf["nodes"]["offer_request_2"]["transitions"][1]["target_node"] == "offer_gate_2"   # refusal: same product

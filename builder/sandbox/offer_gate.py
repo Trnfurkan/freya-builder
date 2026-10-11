@@ -20,6 +20,11 @@
 #   ledger_var, plans_var, reply_var, alt_flag_var   variable names (defaults below)
 #   line_template      e.g. "For your {product}, could you pay {amount} on {date}?" (placeholders: product, amount, date)
 #   product_labels     {product type: label template from the product's fields, e.g. "credit card ending {card_last4}"}
+#   product_index      optional, 1-based: this gate serves only the product at that position of get_account order
+#                      (blocks.product_offer_loops). Seen in practice runs (fix14-ab PUB-12, 3 of 3 runs): with one
+#                      gate for all products, a refusal of the personal loan made the gate ask again for the card the
+#                      customer had already agreed, and the agent then asked for the loan itself: 3-4 requests where
+#                      the brief allowed 2.
 #   settled_var        optional: variable with comma-separated product_ids the customer already agreed or settled
 #                      (blocks.settled_products_extraction()); an open product listed there is never asked again
 import json
@@ -71,7 +76,11 @@ def decide(vars, p):
         state[cur] = "refused"
 
     pick = ""
-    for pid in order:
+    candidates = order
+    idx = int(p.get("product_index") or 0)
+    if idx:   # a gate for one product position: only that product's next request, never another product's
+        candidates = order[idx - 1:idx]
+    for pid in candidates:
         if state.get(pid, "open") != "open":
             continue
         if int(counts.get(pid, 0)) < len(plans.get(pid) or []):

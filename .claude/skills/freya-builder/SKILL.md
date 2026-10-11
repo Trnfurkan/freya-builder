@@ -165,8 +165,21 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   lost (once the old state stayed, once both notes vanished). So never make anything that decides routing or closing
   depend on a variable that pre-hooks of parallel calls write. Do NOT use `mark_product_code(settled_flag=...)` with
   `blocks.settled_transition` / `blocks.closing_node`: the flag never rose, the working node had no closing tool, and
-  the agent said "Goodbye" for minutes until the call timed out. Keep the closing tool in the working node, with the
-  prompt rule "add_note for every product first, wait for every result, then close_call alone in its own message".
+  the agent said "Goodbye" for minutes until the call timed out.
+- **A node with a note tool never holds the closing tool (required; the validator rejects it).** In fix14-ab practice
+  runs close_call went out in the same message as add_note in 4 of 30 calls; the bank closed first and refused the
+  note. Take the closing tool out of the working node, add `blocks.ready_to_close("closing")` to its transitions and
+  `blocks.closing_node("closing", <close tool>, <end>)` (no extra tools) to the nodes. The working node's prompt says:
+  "after every promise and note result has come back ok, take the transition to close; the closing node says goodbye
+  and calls close_call". Transfers keep `outcome_after`, turn caps keep `wrap_up_node`. Nothing here depends on
+  variables written by hooks.
+- **Several products: one gate per product (required when the brief allows more than one product).** Use
+  `nodes, to_gates = blocks.product_offer_loops(<the brief's most products per customer>, <working node>, lambda k:
+  snippets.offer_gate_code({..., "product_index": k}))`, add `nodes` to the workflow and `to_gates` to the working
+  node's transitions instead of one `offer_loop` / `to_gate`. The prompt says: "after a flat refusal of product number
+  k, take the transition to the offer gate for product k". With one gate for all products (fix14-ab PUB-12, 3 of 3
+  runs) a refusal of the personal loan made the gate ask again for the card the customer had agreed, and the agent then
+  asked for the loan itself: 3 or 4 requests where 2 were allowed. Exclude every request node from global nodes.
   Do NOT use `offer_gate_code(settled_var=...)` with `blocks.settled_products_extraction()` either: in a practice call
   the extraction marked a refused loan as agreed and the gate skipped its second allowed request.
 - **Persuasion plans are read, not counted.** If the brief has persuasion attempts per band, put them in

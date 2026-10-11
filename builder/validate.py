@@ -227,6 +227,25 @@ def check_settled_closing(wf, rep):
                 rep.error(where, f"no transition on {f!r}: add blocks.settled_transition(<closing node>, {f!r})")
 
 
+def _is_note_tool(tool):
+    hook = str(tool.get("pre_process_code") or "")
+    name = str((tool.get("function") or {}).get("name", ""))
+    return ("# mark_product:" in hook and '\\"state\\": \\"noted\\"' in hook) or "note" in name.lower()
+
+
+def check_close_with_notes(wf, rep):
+    """A conversation node must not hold a note tool and the closing tool together: in practice runs close_call went
+    out in the same message as add_note and the bank closed first (4 of 30 calls). Use blocks.ready_to_close into a
+    blocks.closing_node instead."""
+    for k, n in (wf.get("nodes") or {}).items():
+        tools = n.get("tools") or []
+        closers = [t for t in tools if "call_closed" in str(t.get("post_process_code") or "")]
+        if closers and any(_is_note_tool(t) for t in tools):
+            rep.error("nodes." + k, "has a note tool and the closing tool together: close_call can go out in the same "
+                                    "message as a note. Take the closing tool out, add blocks.ready_to_close(<closing>) "
+                                    "and blocks.closing_node(<closing>, <close tool>, <end>)")
+
+
 def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
     """Payment requests must pass the offer gate (builder/blocks.offer_loop). Every path into a node that says
     {{offer_line}} must come from a gate code node; nothing else may say the line, return into it with __previous__,
@@ -421,6 +440,7 @@ def validate(wf, spec=None, call_vars=None):
 
     check_offer_gate(wf, rep)
     check_settled_closing(wf, rep)
+    check_close_with_notes(wf, rep)
 
     if spec is not None:
         used = set()

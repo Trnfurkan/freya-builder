@@ -5,6 +5,7 @@ Shapes follow docs/tools-and-code.md ("Tool function shape", "api_call body fiel
 """
 import json
 import os
+import re
 
 MOCK_URL_VAR = "FREYA_MOCK_URL"
 
@@ -19,23 +20,91 @@ def base_url(spec):
     return (os.environ.get(MOCK_URL_VAR) or spec["servers"][0]["url"]).rstrip("/")
 
 
+METHODS = ("get", "post", "put", "patch", "delete")
+
+
+def _ops(spec):
+    """(name, path, method, operation) for every operation. The name is the operationId; without one, the path without
+    its slashes and braces (the kit's shape: POST /verify_identity is verify_identity)."""
+    out = []
+    for path, methods in spec["paths"].items():
+        for method, op in methods.items():
+            if method.lower() in METHODS and isinstance(op, dict):
+                name = op.get("operationId") or re.sub(r"[^A-Za-z0-9_]+", "_", path.strip("/")).strip("_")
+                out.append((name, path, method.lower(), op))
+    return out
+
+
 def tool_names(spec):
-    return [p.strip("/") for p in spec["paths"]]
+    return [n for n, _, _, _ in _ops(spec)]
+
+
+def _find(spec, name):
+    for n, path, method, op in _ops(spec):
+        if n == name:
+            return path, method, op
+    raise KeyError(f"{name} is not in the tool API. Tools: {', '.join(tool_names(spec))}")
 
 
 def operation(spec, name):
-    path = "/" + name
-    if path not in spec["paths"]:
-        raise KeyError(f"{name} is not in the tool API. Tools: {', '.join(tool_names(spec))}")
-    methods = spec["paths"][path]
-    method = next(iter(methods))
-    return method.upper(), methods[method]
+    _, method, op = _find(spec, name)
+    return method.upper(), op
+
+
+def url_params(spec, name):
+    """{name: schema} of the operation's path and query parameters (OpenAPI "parameters", in: path or query)."""
+    path, _, op = _find(spec, name)
+    out = dict()
+    for prm in op.get("parameters") or spec["paths"][path].get("parameters") or []:
+        if isinstance(prm, dict) and prm.get("in") in ("path", "query") and prm.get("name"):
+            schema = dict(prm.get("schema") or {"type": "string"})
+            if prm.get("description"):
+                schema["description"] = prm["description"]
+            schema["_in"], schema["_required"] = prm["in"], bool(prm.get("required") or prm["in"] == "path")
+            out[prm["name"]] = schema
+    return out
+
+
+def tool_url(spec, name):
+    """The tool's url: base address + the operation's own path. Path and query parameters stay as {name} (single
+    braces, never resolved by the engine); URL_PARAMS_HOOK fills them from the body before the request goes out."""
+    path, _, _ = _find(spec, name)
+    query = [k for k, v in url_params(spec, name).items() if v["_in"] == "query"]
+    return base_url(spec) + path + ("?" + "&".join(k + "={" + k + "}" for k in query) if query else "")
+
+
+URL_PARAMS_HOOK = """
+# url parameters (openapi_tools.URL_PARAMS_HOOK): move each from the body into the url, encoded; no body for GET/DELETE
+try:
+    _up = json.loads(%s)
+    _url = str(config.get("url") or "")
+    _body = config.get("body") if isinstance(config.get("body"), dict) else dict()
+    for _k in _up:
+        _raw = str(_body.pop(_k, ""))
+        _enc = "".join(chr(_c) if (chr(_c).isalnum() and _c < 128) or chr(_c) in "-_.~" else "%%%%%%02X" %% _c
+                       for _c in _raw.encode("utf-8"))
+        _url = _url.replace("{" + _k + "}", _enc)
+    config["url"] = _url
+    if str(config.get("method") or "").upper() in ("GET", "DELETE"):
+        config["body"] = dict()
+except Exception:
+    pass
+"""
+
+
+def url_params_hook(names):
+    return "import json\n" + URL_PARAMS_HOOK % json.dumps(json.dumps(list(names)))
 
 
 def body_schema(spec, name):
     _, op = operation(spec, name)
     schema = op.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema", {})
-    return schema.get("properties", {}), schema.get("required", [])
+    props, required = dict(schema.get("properties", {})), list(schema.get("required", []))
+    for k, v in url_params(spec, name).items():   # path and query parameters are filled like body fields
+        props[k] = {f: x for f, x in v.items() if not f.startswith("_")}
+        if v["_required"] and k not in required:
+            required.append(k)
+    return props, required
 
 
 def response_fields(spec, name):
@@ -95,11 +164,11 @@ def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeo
         "function": {
             "name": name,
             "handler": "__function__:api_call",
-            "description": description or spec["paths"]["/" + name][method.lower()].get("summary", ""),
+            "description": description or operation(spec, name)[1].get("summary", ""),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "default": base_url(spec) + "/" + name},
+                    "url": {"type": "string", "default": tool_url(spec, name)},
                     "method": {"type": "string", "default": method},
                     "headers": {"type": "object", "properties": {"Content-Type": {"type": "string", "default": "application/json"}}},
                     "body": {"type": "object", "properties": body, "required": [f for f in required if f not in baked]},
@@ -113,6 +182,9 @@ def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeo
         tool["post_process_code"] = post_hook
     if response_mapping:
         tool["response_mapping"] = list(response_mapping)
+    params = list(url_params(spec, name))
+    if params:   # after the caller's own hook, which may still read or fix these fields
+        tool["pre_process_code"] = (pre_hook + "\n" if pre_hook else "") + url_params_hook(params)
     return tool
 
 

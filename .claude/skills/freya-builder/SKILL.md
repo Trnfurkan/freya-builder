@@ -12,6 +12,15 @@ The agent you build is tested on customers nobody has seen, on several calendar 
 if all three pass. Build for the brief, not for any practice customer. Everything you know about this bank comes from the
 brief files and the tool API file. Never use a value, name, phrase or rule from another brief or from memory.
 
+**Build only the stages the brief asks for.** Much of this skill comes from collections briefs: identity questions,
+payment promises, persuasion attempts (`offer_gate`, `offer_walk`, `promise_guard`), close codes. Those patterns are
+tools for a brief that has those stages, never a template. A brief with another task (for example an enquiry, a
+change request or a hand-off), or one where an earlier system already verified the caller, gets none of them: no
+identity node, no promise, no persuasion, no closing tool the tool API file does not have. Map the brief's own flow
+(its flow drawing, if there is one) to nodes, one node per stage of that flow, and keep the general rules here: facts
+and branching in code and routes, exact sentences as tts, every tool result checked, honest words, turn caps, a
+validated save. A validator check that only fits a stage the brief does not have is not a reason to add that stage.
+
 ## Time plan
 
 - Save a first complete, validated agent within about 40% of the time left. Improve after that, never before.

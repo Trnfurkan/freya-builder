@@ -103,7 +103,7 @@ def _check_api_tool(tool, where, spec, rep, extraction_names):
     url = props.get("url", {})
     if "const" in url and "default" not in url:
         rep.error(where, "url uses const; only default is sent")
-    expected = openapi_tools.base_url(spec) + "/" + name
+    expected = openapi_tools.tool_url(spec, name)
     if url.get("default") != expected:
         rep.error(where, f"url {url.get('default')!r}, the tool API says {expected!r}")
     api_props, api_required = openapi_tools.body_schema(spec, name)

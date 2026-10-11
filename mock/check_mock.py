@@ -18,12 +18,19 @@ import urllib.request
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from builder import openapi_tools as ot  # noqa: E402
 
+try:   # the system's certificate store, as builder.practice does (some networks need it)
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 PLACEHOLDER = {"string": "x", "number": 1, "integer": 1, "boolean": False}
 
 
 def send(method, url, body):
     data = json.dumps(body).encode() if body and method not in ("GET", "DELETE") else None
-    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json",
+                                                                        "User-Agent": "freya-builder-check/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return r.status, r.read().decode("utf-8", "replace")[:300]

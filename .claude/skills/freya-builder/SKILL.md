@@ -178,7 +178,10 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   with `done_target="records"`, and `marks, to_marks = blocks.agreed_marks(<the brief's most products per customer>,
   <working node>, snippets)`; add the nodes, `blocks.records_node("records", [<promise tool>, <note tool>],
   "closing")` and `blocks.closing_node("closing", <close tool>, <end>)`, and give the working node
-  `blocks.to_records("records")`, `blocks.to_gate("offer_gate")` and `to_marks`, and no closing tool or closing
+  `blocks.to_records("records_entry")` with `blocks.records_entry("records_entry", "records", snippets,
+  {"product_labels": <the gate's labels>})` (it writes the summary the records node reads; fix22-a PUB-01: going
+  straight to the records node, the summary was empty and the agent made up "a payment link by SMS"; the validator
+  rejects it), `blocks.to_gate("offer_gate")` and `to_marks`, and no closing tool or closing
   transition (transfers keep `outcome_after`, turn caps `wrap_up_node`). The records node is the only way to a
   normal close; it has no way back to any request (fix17-ab: when the gate's done went back to the working node, it
   made up a new car loan offer). The request node's answers include `too_much`, kept per product by the gate; do not

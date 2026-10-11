@@ -29,6 +29,10 @@
 #                      product only), kept per product in the ledger; alt_flag_var is not used. Seen in a practice
 #                      run (fix17-ab): one call-wide "full amount is too much" extraction turned yes on a plain no, and
 #                      every product got its floor as attempt 1.
+#   summary_only       true for blocks.records_entry: write offer_summary (offer_state "done") and make no request.
+#                      Seen in a practice run (fix22-a PUB-01): the working node went to the records node without
+#                      passing the gate, offer_summary was empty, and the records node made up "a payment link by
+#                      SMS" instead of reading back and recording the promise.
 #   floor_counter_offer  true when the brief offers the floor once after "the full amount is too much" (Brief A rule
 #                      26): the gate then says floor_line_template (product, amount, date) on the same date, once per
 #                      product, without counting it as a persuasion attempt.
@@ -114,7 +118,7 @@ def decide(vars, p):
         state[cur] = "refused"
 
     pick = ""
-    candidates = order
+    candidates = [] if p.get("summary_only") else order   # records_entry: the summary, never a request
     idx = int(p.get("product_index") or 0)
     if idx:   # a gate for one product position: only that product's next request, never another product's
         candidates = order[idx - 1:idx]

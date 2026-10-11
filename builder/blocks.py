@@ -413,6 +413,15 @@ def records_node(name, tools, closing_target, *, task=None, max_turns=20, max_tu
                         max_turn_target=max_turn_target or closing_target)
 
 
+def records_entry(name, records_name, snippets, gate_params=None):
+    """Code node in front of the records node for the working node's way in (to_records(name)): it writes
+    {{offer_summary}} from the offer ledger exactly as the gate does when it is done, and makes no request.
+    gate_params: the same product_labels as the gate, so the summary names the products the same way."""
+    params = dict(gate_params or {})
+    params.update(walk=True, summary_only=True)
+    return code_node(name, snippets.offer_gate_code(params), records_name)
+
+
 def to_records(records_name, when="Nothing is left to ask: every product is agreed, refused after its requests, or "
                                   "settled another way (paid, dispute, hardship). Go on to the read-back, records and "
                                   "notes."):

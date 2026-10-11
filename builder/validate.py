@@ -394,6 +394,14 @@ def check_walk(wf, rep, every, gates, say_nodes):
     closers = {k for k, n, _ in every if any(_is_closer(x)
                                              for x in n.get("tools") or [])}
     walk_feeding = [k for k in feeding if any(t.get("target_node") in walk_gates for t in nodes[k].get("transitions") or [])]
+    done_targets = {t.get("target_node") for g in walk_gates for t in nodes[g].get("transitions") or []
+                    if '"offer_state"' in json.dumps(t.get("condition"))}
+    for k in walk_feeding:
+        for t in nodes[k].get("transitions") or []:
+            if t.get("target_node") in done_targets and t.get("target_node") not in gates:
+                rep.error("nodes." + k, f"goes straight to the records node {t.get('target_node')!r}: offer_summary is "
+                                        "not written on that way (fix22-a: the records node made up a payment link); "
+                                        "go through blocks.records_entry")
     for k in walk_feeding:
         n = nodes[k]
         if k in closers:

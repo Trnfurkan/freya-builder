@@ -171,10 +171,11 @@ def walk_workflow(**changes):
                           pre_hook=snippets.promise_guard_code({"check_dates": True, "max_attempts": 2}))
     marks, to_marks = b.agreed_marks(3, "negotiate", snippets)
     work = b.conversation("negotiate", changes.get("task", "{{product_facts}}"), tools=[],
-                          transitions=[b.to_records("records"), b.to_gate("offer_gate"), *to_marks],
+                          transitions=[b.to_records("records_entry"), b.to_gate("offer_gate"), *to_marks],
                           max_turns=40, max_turn_target="wrap_up")
     nodes = [b.code_node("facts", snippets.date_facts_code(changes.get("policy", POLICY)), "negotiate"), work,
              *b.offer_walk("offer_gate", "offer_request", "negotiate", WALK, done_target="records"), *marks,
+             b.records_entry("records_entry", "records", snippets),
              b.records_node("records", [promise, note], "closing"),
              b.closing_node("closing", close, "end"), b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")]
     return b.workflow("facts", nodes)
@@ -444,3 +445,35 @@ def test_a_walk_with_too_much_marks_validates():
     for n in tm_nodes:
         wf["nodes"][n["name"]] = n
     assert report(wf)[0] == []
+
+
+
+# --- fix22-a PUB-01: "I can pay the full amount today" -> records with the summary ------------------------------
+
+def test_pub01_pay_today_reaches_the_records_with_the_agreement_in_the_summary():
+    """The customer agreed at the first question; the walk never ran. The records entry writes the summary."""
+    v = start("PUB-01")
+    mark(v, 1)
+    entry = snippets.offer_gate_code({"product_labels": {"credit_card": "credit card ending {card_last4}"},
+                                      "walk": True, "summary_only": True})
+    exec(entry, {"vars": v})
+    assert v["offer_state"] == "done" and v.get("offer_line", "") == ""
+    assert "credit card ending 4821 (p1): on the terms the customer said in this call" in v["offer_summary"]
+    assert led(v)["counts"] == {}                                       # no request made or counted
+
+
+def test_summary_only_never_makes_a_request_even_with_open_products():
+    v = start("PUB-12")
+    entry = snippets.offer_gate_code({"walk": True, "summary_only": True})
+    exec(entry, {"vars": v})
+    assert v["offer_state"] == "done" and led(v)["counts"] == {}
+
+
+def test_validator_rejects_the_records_node_without_its_entry():
+    wf = walk_workflow()
+    for t in wf["nodes"]["negotiate"]["transitions"]:
+        if t["target_node"] == "records_entry":
+            t["target_node"] = "records"
+    assert any("goes straight to the records node" in m for m in report(wf)[0])
+    entry = wf["nodes"]["records_entry"]
+    assert entry["passthrough_default_transition"] == "records"

@@ -18,6 +18,10 @@
 #   agent_offers            date tokens (as in attempt_offers) the brief has the agent propose outside the persuasion
 #                           attempts, e.g. ["today"] for a first "can you pay today?" (optional, default none)
 #   no_exact_day            what the brief records when the customer gives no exact day: "deadline" or "" (none)
+#   plans_in_facts          false when an offer gate makes the requests: product_facts then says that the gate makes
+#                           them instead of listing each attempt's amount and date (the plans stay in offer_plans for
+#                           the gate). Seen in a practice run: with the plan in its prompt the working node asked
+#                           attempt 1 word for word itself, then the gate asked both attempts again (3 where 2 allowed).
 #   attempt_offers          the brief's persuasion attempts in order, each {amount, date}; a product gets as many as its
 #                           band's `attempts`. amount: "full", "floor" or "full_or_floor" (full, or the floor when the
 #                           customer already said the full amount is too much). date: "today", "next_business_day",
@@ -355,7 +359,11 @@ def _main(vars, p):
             labels[pid] = dict((k, str(v)) for k, v in prod.items())
             if plan:
                 vars["offer_plan_" + pid] = plan
-                plan_lines.append("  " + plan)
+                if p.get("plans_in_facts", True):
+                    plan_lines.append("  " + plan)
+                else:
+                    plan_lines.append("  " + pid + ": persuasion requests are made only by the offer gate for product "
+                                      + str(i + 1) + "; never word one yourself.")
         elif late is not None:
             text += ". days_late " + str(late) + " matches no band"
         plines.append(text + ".")

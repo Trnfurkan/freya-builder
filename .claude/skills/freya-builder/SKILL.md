@@ -184,9 +184,11 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   the extraction marked a refused loan as agreed and the gate skipped its second allowed request.
 - **Persuasion plans are read, not counted.** If the brief has persuasion attempts per band, put them in
   `date_params.json` as `attempt_offers` (in order, each an amount and a date token, keys at the top of
-  `builder/sandbox/date_facts.py`). Each product then gets its own plan in `product_facts`, with exactly as many
-  attempts as its band allows. Tell the agent to follow each product's plan step by step. Practice agents made a second
-  offer on a product whose band allowed one.
+  `builder/sandbox/date_facts.py`). Each product then gets its own plan, with exactly as many attempts as its band
+  allows, in `offer_plans` for the offer gate. With the gate (always, when the brief limits requests) also set
+  `"plans_in_facts": false` (the validator requires it): `product_facts` then says the gate makes the requests instead
+  of listing each attempt's amount and date. With the plan in its prompt, a practice agent asked attempt 1 word for word
+  itself and the gate asked both attempts again (3 requests where 2 were allowed).
 - **Several products: one lookup line per day.** With more than one product, `product_facts` holds a day-by-day
   table saying what each product gets for each date. Tell the agent to find the named date's line and do exactly what it
   says for every product. With the rule in the prompt alone, a practice agent moved a card whose date was allowed onto

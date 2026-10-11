@@ -222,9 +222,35 @@ def test_product_gates_validate_in_a_workflow():
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=snippets.mark_product_code({"state": "noted"}))
     gates, to_gates = b.product_offer_loops(3, "negotiate", _gate_code)
     work = _negotiate([note], [b.ready_to_close("closing"), *to_gates])
-    facts = b.code_node("facts", snippets.date_facts_code(POLICY), "negotiate")
+    facts = b.code_node("facts", snippets.date_facts_code({**POLICY, "plans_in_facts": False}), "negotiate")
     wf = b.workflow("facts", [facts, work, *gates, b.closing_node("closing", close, "end"),
                               b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")])
     assert _errors(wf) == []
     assert [t["target_node"] for t in work["transitions"][1:]] == ["offer_gate_1", "offer_gate_2", "offer_gate_3"]
     assert wf["nodes"]["offer_request_2"]["transitions"][1]["target_node"] == "offer_gate_2"   # refusal: same product
+
+
+# --- the working node does not see the attempts' amounts and dates (fix15-ab v2: attempt 1 asked word for word) ---
+
+def test_without_plans_in_facts_the_prompt_has_no_attempt_amounts_or_dates():
+    from builder.facts import facts
+    with_plans = facts(POLICY, "2026-10-14T11:00", account("PUB-12"))
+    gated = facts({**POLICY, "plans_in_facts": False}, "2026-10-14T11:00", account("PUB-12"))
+    assert "attempt 1 = propose" in with_plans["product_facts"]
+    assert "attempt 1 = propose" not in gated["product_facts"]
+    assert "persuasion requests are made only by the offer gate for product 2" in gated["product_facts"]
+    assert gated["offer_plans"] == with_plans["offer_plans"]            # the gates still get every attempt
+    assert "1320.00" in gated["product_facts"]                          # the debt itself is still stated
+
+
+def test_validator_wants_plans_out_of_the_prompt_when_a_gate_exists():
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    gates, to_gates = b.product_offer_loops(3, "negotiate", _gate_code)
+
+    def wf(policy):
+        work = _negotiate([], [b.ready_to_close("closing"), *to_gates])
+        return b.workflow("facts", [b.code_node("facts", snippets.date_facts_code(policy), "negotiate"), work, *gates,
+                                    b.closing_node("closing", close, "end"), b.wrap_up_node("wrap_up", close, "end"),
+                                    b.end_node("end")])
+    assert any("plans_in_facts" in m for m in _errors(wf(POLICY)))
+    assert not any("plans_in_facts" in m for m in _errors(wf({**POLICY, "plans_in_facts": False})))

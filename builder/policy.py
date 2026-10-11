@@ -83,6 +83,8 @@ def check(params):
         errors.append(f"non_business_day {params.get('non_business_day')!r} is not one of {NON_BUSINESS}")
     if params.get("after_deadline", "deadline") not in AFTER_DEADLINE:
         errors.append(f"after_deadline {params.get('after_deadline')!r} is not one of {AFTER_DEADLINE}")
+    if not isinstance(params.get("plans_in_facts", True), bool):
+        errors.append(f"plans_in_facts {params.get('plans_in_facts')!r} must be true or false")
     agent = params.get("agent_offers", [])
     if not isinstance(agent, list) or any(t not in DATE_TOKENS for t in agent):
         errors.append(f"agent_offers {agent!r} must be a list of {DATE_TOKENS}")

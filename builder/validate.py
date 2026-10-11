@@ -260,6 +260,10 @@ def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
     if limited and (not gates or not say_nodes):
         rep.error("workflow", "the policy allows a limited number of persuasion attempts but the workflow has no "
                               "offer gate: build the requests with builder.blocks.offer_loop and to_gate")
+    if gates and pol and pol.get("plans_in_facts", True):
+        rep.error("workflow", "the offer gate makes the payment requests but date_params.json leaves plans_in_facts on: "
+                              "product_facts then shows each attempt's amount and date and the working node asks them "
+                              "itself (seen in a practice run); set \"plans_in_facts\": false")
     if not say_nodes and not gates:
         return
     if not gates:

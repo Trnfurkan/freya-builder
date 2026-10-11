@@ -212,6 +212,9 @@ def test_a_band_without_attempts_asks_for_nothing_at_run_time():
 
 # --- the workflow cannot reach a request without the gate ----------------------------------------------------------
 
+GATED_POLICY = {**POLICY, "plans_in_facts": False}   # the gate words the requests, not the prompt
+
+
 @pytest.fixture
 def gated(openapi):
     cid = {"customer_id": "{{customer_id}}"}
@@ -221,7 +224,7 @@ def gated(openapi):
     work = b.conversation("negotiate", "{{product_facts}}", tools=[promise, note],
                           transitions=[b.ready_to_close("closing"), b.to_gate("offer_gate")],
                           max_turns=60, max_turn_target="wrap_up")
-    nodes = [b.code_node("facts", snippets.date_facts_code(POLICY), "negotiate"), work,
+    nodes = [b.code_node("facts", snippets.date_facts_code(GATED_POLICY), "negotiate"), work,
              *b.offer_loop("offer_gate", "offer_request", "negotiate", GATE),
              b.closing_node("closing", close, "end"),
              b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")]

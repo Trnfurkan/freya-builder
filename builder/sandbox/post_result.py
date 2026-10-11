@@ -16,6 +16,11 @@
 #   fail_count_var  variable that counts this tool's failed calls (a blocked guard request does not count)
 #   fail_limit      on the failure that reaches this count, on_failure_final replaces on_failure
 #   on_failure_final instruction for that last failure (for "try once more, then ..." rules)
+#   passed_fields   {"field_var", "data_field", "set_var", "need", "flag"}: when data[data_field] is true, the
+#                   field kept in vars[field_var] (normalize_answer.py remember_field) is added to vars[set_var]; once
+#                   `need` different fields passed, vars[flag] = "yes". A second way to know identity passed when the
+#                   service leaves out its all-passed field: seen in a practice run (raw-a PUB-05) where both answers
+#                   came back verified true without all_verified, and the call never left the identity node.
 #   on_rejected     instruction when the service answered normally (HTTP below 400) with ok false and an `error`: the
 #                   tool API says "ok is false when the action was not carried out", a decision, not a service failure
 #                   (that is HTTP 500: "Nothing was recorded. The call may be repeated."). The text "<error>" in it is
@@ -98,6 +103,18 @@ def _apply(res, p, variables):
             note = reason + " This is not a service failure and does not count as a failed attempt. " \
                 + "Tell the customer what can be recorded instead, following your rules, and read it back before trying again."
         variables[guard] = ""
+    pf = p.get("passed_fields")
+    if pf and isinstance(variables, dict) and not failed and str(data.get(pf.get("data_field") or "verified")).lower() == "true":
+        try:
+            done = json.loads(variables.get(pf["set_var"]) or "[]")
+        except Exception:
+            done = []
+        field = str(variables.get(pf["field_var"]) or "")
+        if field and field not in done:
+            done.append(field)
+        variables[pf["set_var"]] = json.dumps(done)
+        if len(done) >= int(pf.get("need") or 2):
+            variables[pf.get("flag") or "identity_passed"] = "yes"
     if isinstance(variables, dict):
         for k, v in (p.get("set_on_any") or dict()).items():
             variables[k] = v

@@ -16,6 +16,7 @@
 #   day_first      read an all-numeric date as day, month, year (true) or month, day, year (false)
 #   numeric_fields values of field_key whose answer is digits only (optional; else any all-number answer)
 #   all_dates      true: the answer is always a date, whatever field_key says (e.g. a promise's named day)
+#   remember_field variable that keeps the field of the last question sent (for post_result.py passed_fields)
 import json
 import re
 import datetime
@@ -221,5 +222,7 @@ try:
         _f = _b.get(PARAMS.get("field_key")) if PARAMS.get("field_key") else None
         if _k in _b:
             _b[_k] = normalize(_f, _b[_k], PARAMS)
+        if PARAMS.get("remember_field"):
+            vars[PARAMS["remember_field"]] = str(_f or "")
 except Exception:
     pass

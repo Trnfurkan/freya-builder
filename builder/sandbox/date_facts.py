@@ -30,6 +30,7 @@
 #
 # Writes: date_facts, product_facts (text for prompts), today_iso, next_business_day_iso,
 #   last_business_day_this_week_iso, last_business_day_next_week_iso, deadline_<band>, deadline_<product_id>,
+#   calendar_facts (today and the next days, business or not; no deadline, amount or floor),
 #   product_count, and promise_rules: a JSON string mapping each product_id to its dates, deadline, floor and full amount
 #   (plus today and the brief's non_business_day / after_deadline choices), that builder/sandbox/promise_guard.py reads
 #   to check a promise before it is sent.
@@ -312,6 +313,14 @@ def _main(vars, p):
                      "what it says; never work it out yourself: " + "; ".join(acts) + ".")
         vars["date_actions_" + str(b["name"])] = "; ".join(acts)
     vars["date_facts"] = "\n".join(lines)
+    # A calendar with no deadline, amount or floor: for nodes that read back and record but must never make a
+    # request (blocks.records_node). Seen in a practice run (fix23-a PUB-01): without any date the records node
+    # wrote "today" as 2025-05-14 and the promise was blocked once.
+    cal, d = [], today
+    for _ in range(int(p.get("calendar_days", 21))):
+        cal.append(_label(d) + ("" if _is_business(d, p) else " (not a business day)") + (" = today" if d == today else ""))
+        d = d + datetime.timedelta(days=1)
+    vars["calendar_facts"] = "Today is " + _label(today) + ". Calendar: " + "; ".join(cal) + "."
 
     products = _load_products(vars, p)
     f = p.get("product_fields") or dict()

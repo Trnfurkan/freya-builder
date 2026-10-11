@@ -46,7 +46,7 @@ def test_requests_per_product_never_exceed_the_band_limit_from_the_brief():
 
 
 def test_workflow_without_the_gate_is_not_deliverable_when_the_brief_limits_requests():
-    close = ot.api_tool(OPENAPI, "close_call", baked={"customer_id": "{{customer_id}}"}, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked={"customer_id": "{{customer_id}}"}, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
 
     def wf(policy):
         return b.workflow("facts", [
@@ -124,8 +124,8 @@ def test_account_is_loaded_only_on_all_verified_true():
 # close_call loop, early close, technical error said to the customer ---------------------------------------------------
 
 def test_after_close_the_call_ends_on_any_answer_and_the_agent_says_one_word():
-    kinds = {(c["variable"], c["operator"]) for c in b.closed_transition("end")["condition"]["conditions"]}
-    assert ("close_call_response.data.ok", "is_set") in kinds and ("call_closed", "equals") in kinds
+    kinds = {(c["variable"], c["operator"]) for c in b.closed_transition("end")["condition"]["conditions"] if "variable" in c}
+    assert ("call_closed", "equals") in kinds and ("close_call_success_count", "greater_than") in kinds
     v = {}
     r = snippets.run_post_hook(b.close_post_hook(snippets), {"status": "success", "status_code": 200, "data": {"ok": True}}, v)
     assert v == {"call_closed": "yes"} and r["data"]["what_to_do_next"].endswith("Goodbye.")
@@ -142,3 +142,48 @@ def test_a_turn_cap_never_hangs_up_without_closing():
     wrap = b.wrap_up_node("wrap_up", close, "end")
     assert [t["function"]["name"] for t in wrap["tools"]] == ["close_call"]
     assert wrap["transitions"][0]["target_node"] == "end"
+
+
+# --- raw-a: identity passed without all_verified; closing tool marks itself sent -----------------------------------
+
+def _verify_hooks():
+    pre = snippets.normalize_answer_code({"field_key": "field", "answer_key": "answer", "date_fields": ["date_of_birth"],
+                                         "day_first": True, "remember_field": "verify_last_field"})
+    post = snippets.post_result_code("Next.", "Again.", passed_fields={"field_var": "verify_last_field",
+                                                                       "data_field": "verified", "set_var": "verified_fields",
+                                                                       "need": 2, "flag": "identity_passed"})
+    return pre, post
+
+
+def _answer(pre, post, v, field, answer, verified):
+    snippets.run_pre_hook(pre, {"field": field, "answer": answer}, v)
+    snippets.run_post_hook(post, {"status": "success", "status_code": 200,
+                                  "data": {"ok": True, "verified": verified, "wrong_answers_left": 3}}, v)
+
+
+def test_pub05_both_answers_verified_without_all_verified_passes_identity():
+    case = CASES["PUB-05"]
+    pre, post = _verify_hooks()
+    v = {}
+    _answer(pre, post, v, "date_of_birth", case["identity"]["date_of_birth"], True)
+    assert v.get("identity_passed") != "yes"
+    _answer(pre, post, v, "phone_last4", case["identity"]["phone_last4"], True)
+    assert v["identity_passed"] == "yes"
+    t = b.identity_passed("load_account")
+    assert {"variable": "identity_passed", "operator": "equals", "operand": "yes"} in t["condition"]["conditions"]
+
+
+def test_identity_flag_needs_different_fields_and_true_answers():
+    pre, post = _verify_hooks()
+    v = {}
+    _answer(pre, post, v, "date_of_birth", "1990-09-09", True)
+    _answer(pre, post, v, "date_of_birth", "1990-09-09", True)             # the same question twice
+    _answer(pre, post, v, "phone_last4", "0000", False)                    # a wrong answer
+    assert v.get("identity_passed") != "yes"
+
+
+def test_validator_wants_the_close_pre_hook():
+    close = ot.api_tool(OPENAPI, "close_call", baked={"customer_id": "{{customer_id}}"}, post_hook=b.close_post_hook(snippets))
+    wf = b.workflow("talk", [b.conversation("talk", "Talk.", tools=[close], transitions=[b.closed_transition("end")],
+                                            max_turns=30, max_turn_target="end"), b.end_node("end")])
+    assert any("close_pre_hook" in m for lvl, _, m in validate(wf, OPENAPI).items if lvl == "ERROR")

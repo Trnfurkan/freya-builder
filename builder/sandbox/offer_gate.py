@@ -84,6 +84,10 @@ def decide(vars, p):
     if cur and reply == "accepted":
         state[cur] = "agreed"
         ledger.setdefault("agreed", dict())[cur] = ledger.get("step") or dict()   # the request's own amount and date
+    elif cur and reply == "hardship":
+        # Illness, job loss or a death (Brief A rule 32: no persuasion attempt): never asked again, even if the
+        # working node comes back to the gate.
+        state[cur] = "hardship"
     elif cur and reply == "own_terms":
         # The customer named their own day or amount for this product: agreed on their terms. The walk goes on to the
         # next product; the terms are read back and checked by the promise guard when they are recorded. Seen in a

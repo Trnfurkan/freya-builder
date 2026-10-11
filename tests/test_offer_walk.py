@@ -165,7 +165,7 @@ def test_6_promise_calls_have_their_own_counter_and_no_duplicate():
 # --- the workflow graph -------------------------------------------------------------------------------------
 
 def walk_workflow(**changes):
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=snippets.mark_product_code({"state": "noted"}))
     promise = ot.api_tool(OPENAPI, "create_promise", baked=CID,
                           pre_hook=snippets.promise_guard_code({"check_dates": True, "max_attempts": 2}))
@@ -191,7 +191,7 @@ def test_the_walk_validates_and_answers_go_into_the_gate():
     errors, warnings = report(wf)
     assert errors == []
     req = wf["nodes"]["offer_request"]
-    assert [t["target_node"] for t in req["transitions"]] == ["offer_gate"] * 4 + ["negotiate"]
+    assert [t["target_node"] for t in req["transitions"]] == ["offer_gate"] * 4 + ["negotiate"] * 3
     assert any("not provable from the graph" in w for w in warnings)   # the model's free text is reported, not hidden
     assert all(wf["nodes"][f"mark_agreed_{k}"]["passthrough_default_transition"] == "negotiate" for k in (1, 2, 3))
 
@@ -223,7 +223,7 @@ def test_validator_rejects_a_plan_shown_to_the_model_and_plans_left_in_facts():
 
 def test_validator_rejects_limits_counted_only_at_the_bank():
     """A promise counter (max_attempts) without the gate leaves the spoken requests uncounted."""
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     promise = ot.api_tool(OPENAPI, "create_promise", baked=CID,
                           pre_hook=snippets.promise_guard_code({"check_dates": True, "max_attempts": 2}))
     wf = b.workflow("facts", [b.code_node("facts", snippets.date_facts_code(POLICY), "negotiate"),
@@ -303,7 +303,7 @@ def test_too_much_uses_the_floor_when_the_plan_allows_it():
 def test_the_reply_classes_keep_a_plain_no_out_of_too_much():
     req = walk_workflow()["nodes"]["offer_request"]
     e = req["extraction_schema"][0]
-    assert e["enum_values"] == ["accepted", "own_terms", "too_much", "refused", "other"]
+    assert e["enum_values"] == ["accepted", "own_terms", "too_much", "refused", "hardship", "plan_or_human", "other"]
     assert "a plain no is refused, never too_much" in e["description"]
 
 
@@ -366,14 +366,14 @@ def test_validator_rejects_facts_in_the_records_node():
 
 def test_only_the_closing_hook_counts_as_a_closing_tool():
     from builder.validate import _is_closer
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, post_hook=snippets.post_result_code("Saved.", "Not saved."))
     assert _is_closer(close) and not _is_closer(note)      # post_result.py's comments mention call_closed
     assert "call_closed" in note["post_process_code"]
 
 
 def test_records_node_closes_after_the_promise_in_a_one_product_brief():
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     promise = ot.api_tool(OPENAPI, "create_promise", baked=CID)
     rec = b.records_node("records", [promise], "closing", close_after="create_promise")
     conds = [json.dumps(t["condition"]) for t in rec["transitions"]]
@@ -477,3 +477,43 @@ def test_validator_rejects_the_records_node_without_its_entry():
     assert any("goes straight to the records node" in m for m in report(wf)[0])
     entry = wf["nodes"]["records_entry"]
     assert entry["passthrough_default_transition"] == "records"
+
+
+
+# --- fix23-a: dates for the records node; hardship and plan requests never go to the gate ----------------------
+
+def test_calendar_facts_give_dates_without_deadlines_or_amounts():
+    """PUB-01 (fix23-a): the records node wrote "today" as 2025-05-14; it needs the dates, not the offer facts."""
+    v = start("PUB-01")
+    cal = v["calendar_facts"]
+    assert cal.startswith("Today is Wednesday 2026-10-14.") and "Wednesday 2026-10-14 = today" in cal
+    assert "Saturday 2026-10-17 (not a business day)" in cal
+    assert "deadline" not in cal.lower() and "420" not in cal and "floor" not in cal.lower()
+
+
+def test_records_node_reads_the_calendar_and_still_validates():
+    wf = walk_workflow()
+    assert "{{calendar_facts}}" in wf["nodes"]["records"]["task_message"]
+    assert report(wf)[0] == []
+
+
+def test_hardship_and_plan_requests_go_to_the_working_node_not_the_gate():
+    """PUB-05 and PUB-09 (fix23-a): job loss and a plan request were taken as refusals and the gate kept asking."""
+    req = walk_workflow()["nodes"]["offer_request"]
+    targets = {t["condition"]["conditions"][0]["operand"]: t["target_node"] for t in req["transitions"]}
+    assert targets["hardship"] == "negotiate" and targets["plan_or_human"] == "negotiate"
+    assert targets["refused"] == "offer_gate"
+    v = start("PUB-05")
+    enter_gate(v)
+    before = dict(led(v)["counts"])
+    assert enter_gate(v, "hardship") == ("done", "")     # if the gate is ever entered with it, it asks nothing new
+    assert led(v)["counts"] == before and led(v)["state"]["p1"] == "hardship"
+    assert enter_gate(v) == ("done", "")
+
+
+
+def test_validator_wants_summary_and_calendar_in_the_records_node():
+    wf = walk_workflow()
+    wf["nodes"]["records"]["task_message"] = "Read back and record. {{offer_summary}}"
+    wf["nodes"]["records"]["on_enter"]["prompt"] = "Speak now."
+    assert any("does not show ['calendar_facts']" in m for m in report(wf)[0])

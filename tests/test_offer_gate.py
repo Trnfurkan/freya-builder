@@ -218,7 +218,7 @@ GATED_POLICY = {**POLICY, "plans_in_facts": False}   # the gate words the reques
 @pytest.fixture
 def gated(openapi):
     cid = {"customer_id": "{{customer_id}}"}
-    close = ot.api_tool(openapi, "close_call", baked=cid, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(openapi, "close_call", baked=cid, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     promise = ot.api_tool(openapi, "create_promise", baked=cid, pre_hook=PROMISE_HOOK)
     note = ot.api_tool(openapi, "add_note", baked=cid, pre_hook=snippets.mark_product_code({"state": "noted"}))
     work = b.conversation("negotiate", "{{product_facts}}", tools=[promise, note],

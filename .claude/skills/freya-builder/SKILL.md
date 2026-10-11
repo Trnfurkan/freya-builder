@@ -67,8 +67,14 @@ brief files and the tool API file. Never use a value, name, phrase or rule from 
    - If the brief limits promise dates or amounts: `snippets.promise_guard_code({...})` as `pre_hook` on the promise tool
      (`check_dates`, `check_amount` from the brief) and `guard_var="promise_guard"` in that tool's `post_result_code`.
      A request that breaks the rules then records nothing and the agent is told why and what is allowed.
+   - **Identity, two ways to know it passed:** give the identity tool `normalize_answer_code({..., "remember_field":
+     "verify_last_field"})` and `post_result_code(..., passed_fields={"field_var": "verify_last_field", "data_field":
+     "verified", "set_var": "verified_fields", "need": <the brief's number of questions>, "flag": "identity_passed"})`,
+     and route with `blocks.identity_passed(<account node>, <the service's all-passed field>)` (raw-a PUB-05: the
+     service left out all_verified, both answers were verified, and the call never left the identity node).
    - **Closing, always this pattern** (practice runs showed agents looping after closing, and turn caps hanging up without
-     the closing call): post-hook `blocks.close_post_hook(snippets)` on the closing tool; `blocks.closed_transition(<end>)`
+     the closing call): pre-hook `blocks.close_pre_hook()` and post-hook `blocks.close_post_hook(snippets)` on the closing
+     tool (the validator requires both; raw-a: a late answer let close_call go out twice); `blocks.closed_transition(<end>)`
      first in the transitions of every node that has the closing tool; one `blocks.wrap_up_node(...)`, and every
      conversation node's `max_turn_target` points at it, never straight at the end node.
 
@@ -189,7 +195,11 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   also include `own_terms` ("I will pay it tomorrow"): the gate marks that product agreed and goes on, so the working
   node is not entered (fix18-ab: it was, and asked for the loans itself). Leave the records node's default task: it
   sees only `{{offer_summary}}` (product names, agreed amounts and dates, refused products). Never put
-  `{{product_facts}}`, `{{date_facts}}` or other facts into the records node or the system prompt: the validator
+  `{{product_facts}}`, `{{date_facts}}` or other facts into the records node or the system prompt (it gets
+  `{{calendar_facts}}`, dates without deadlines or amounts, through blocks.RECORDS_TASK; a records node without the
+  summary and the calendar is rejected; fix23-a: without dates it wrote today as 2025-05-14). The request node's
+  answers also include `hardship` and `plan_or_human`, which go to the working node and never to the gate (fix23-a:
+  job loss and a plan request were taken as refusals and the gate kept asking): the validator
   rejects it (fix18-ab: with the facts the records node asked for the car loan's floor on its deadline).
   With one product and no note rule (Brief A style) give the records node `close_after="create_promise"`: it moves to
   closing as soon as the promise answered ok true or failed twice (fix20-a: without it the records node said goodbye

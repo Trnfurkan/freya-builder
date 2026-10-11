@@ -210,11 +210,31 @@ def global_node(name, condition, task, *, on_enter=None, target="__previous__", 
 CLOSED_FLAG = "call_closed"
 
 
-def closed_transition(target, tool="close_call", flag=CLOSED_FLAG):
-    """Leave for the end node once the closing tool answered: success counter, any parsed response, a second
-    failure, or the flag its post-hook sets (close_post_hook)."""
-    return go(target, f"{tool} answered: end the call", gt(f"{tool}_success_count", 0),
-              is_set(f"{tool}_response.data.ok"), gt(f"{tool}_failure_count", 1), eq(flag, "yes"))
+def identity_passed(target, all_field="verify_identity_response.data.all_verified", flag="identity_passed"):
+    """Transition when identity passed: the service's all-passed field, or the flag post_result_code(passed_fields=...)
+    sets once every question came back verified true (raw-a PUB-05: all_verified was left out and the call stayed in
+    the identity node)."""
+    return go(target, "every security question passed", *is_true(all_field), eq(flag, "yes"))
+
+
+CLOSE_SENT = "close_sent"
+
+
+def close_pre_hook(flag=CLOSE_SENT):
+    """pre_process_code for the closing tool: marks that close_call went out. Seen in practice runs (raw-a PUB-06,
+    PUB-10): the first close_call's answer had not come back when the customer said "Okay", the call did not end,
+    and the agent called close_call again ("the call is already closed")."""
+    return "try:\n    vars['" + flag + "'] = 'yes'\nexcept Exception:\n    pass\n"
+
+
+def closed_transition(target, tool="close_call", flag=CLOSED_FLAG, sent=CLOSE_SENT):
+    """Leave for the end node once the closing tool succeeded (counter or the flag of close_post_hook), failed twice,
+    or went out (close_pre_hook) and was not refused by the bank. A refusal (ok false, e.g. a reason the outcome does
+    not take) keeps the node so the agent can close again with valid values; seen in a practice run (raw-a PUB-05),
+    ending on any answer left the call without a valid close."""
+    return go(target, f"{tool} answered: end the call", gt(f"{tool}_success_count", 0), eq(flag, "yes"),
+              gt(f"{tool}_failure_count", 1),
+              all_of(eq(sent, "yes"), is_not_set(f"{tool}_response.data.ok") + is_true(f"{tool}_response.data.ok")))
 
 
 def close_post_hook(snippets, flag=CLOSED_FLAG):
@@ -354,7 +374,9 @@ WALK_REPLY = ("The customer's answer to the payment request just made, about thi
               "themselves, for example 'I will pay it tomorrow', 'I can pay it on the 30th', even when they said it "
               "before); too_much (says in so many words that this amount is too high, too much or "
               "more than they can afford); refused (says no, will not or cannot pay, without saying the amount is too "
-              "high and without proposing anything: a plain no is refused, never too_much); other (asks a question, hesitates, or mentions illness, job loss, a death, a dispute, a payment "
+              "high, without giving a reason and without proposing anything: a plain no is refused, never too_much); "
+              "hardship (mentions illness, job loss or a death in the family, or that they cannot pay because of it); "
+              "plan_or_human (asks for a new payment plan, lower instalments, restructuring, or a human); other (asks a question, hesitates, or mentions illness, job loss, a death, a dispute, a payment "
               "already made, a new plan, a human, or anything else).")
 
 
@@ -372,13 +394,18 @@ def offer_walk(gate_name, say_name, back_node, gate_code, *, done_target=None, r
             "repeat the request word for word.")
     request = conversation(
         say_name, task, on_enter=say(OFFER_LINE),
-        extraction=[extract(reply_var, "string", WALK_REPLY, enum=["accepted", "own_terms", "too_much", "refused", "other"],
+        extraction=[extract(reply_var, "string", WALK_REPLY,
+                            enum=["accepted", "own_terms", "too_much", "refused", "hardship", "plan_or_human", "other"],
                             min_confidence=0.6)],
         transitions=[go(gate_name, "the customer accepted the request: the gate records it and goes on", eq(reply_var, "accepted")),
                      go(gate_name, "the customer named their own day or amount: the gate marks it agreed and goes on",
                         eq(reply_var, "own_terms")),
                      go(gate_name, "the amount is too much for this product: the gate decides", eq(reply_var, "too_much")),
                      go(gate_name, "the customer refused: the gate decides the next request, if any", eq(reply_var, "refused")),
+                     go(back_node, "illness, job loss or a death: the working node handles it (no persuasion)",
+                        eq(reply_var, "hardship")),
+                     go(back_node, "a new plan, restructuring or a human: the working node handles it",
+                        eq(reply_var, "plan_or_human")),
                      go(back_node, "the customer said something else", eq(reply_var, "other"))],
         max_turns=max_turns, max_turn_target=back_node)
     return [gate, request]
@@ -386,6 +413,7 @@ def offer_walk(gate_name, say_name, back_node, gate_code, *, done_target=None, r
 
 RECORDS_TASK = ("No payment request is allowed any more and you never make one: never name an amount or a date that is "
                 "not in the summary below, never ask whether the customer can pay. The summary: {{offer_summary}}\n"
+                "Dates (write every date as YYYY-MM-DD from this calendar, never from memory): {{calendar_facts}}\n"
                 "Do only this, in order: read back together every agreed promise (product, amount, date) and ask \"Do "
                 "you confirm?\"; after a clear yes call create_promise once per agreed product, one call per message; "
                 "then call add_note once for each product without a recorded promise, one call per message, waiting for "

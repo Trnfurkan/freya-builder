@@ -289,7 +289,7 @@ def test_promise_tool_with_the_helper_field_validates_and_needs_the_hook():
     assert tool["function"]["parameters"]["properties"]["body"]["properties"][NAMED]["default"] == "{{" + NAMED + "}}"
     with pytest.raises(ValueError):
         ot.api_tool(OPENAPI, "create_promise", baked=cid, helper_fields={NAMED: text})
-    close = ot.api_tool(OPENAPI, "close_call", baked=cid, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=cid, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     wf = b.workflow("talk", [b.conversation("talk", "Talk.", tools=[tool, close], transitions=[b.closed_transition("end")],
                                             max_turns=30, max_turn_target="wrap_up"),
                              b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")])

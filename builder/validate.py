@@ -246,6 +246,16 @@ def _is_note_tool(tool):
     return ("# mark_product:" in hook and '\\"state\\": \\"noted\\"' in hook) or "note" in name.lower()
 
 
+def check_close_marks_sent(wf, rep):
+    """Every closing tool marks that it went out (blocks.close_pre_hook), so blocks.closed_transition can end the call
+    before a late answer: in practice runs (raw-a PUB-06, PUB-10) close_call was sent twice."""
+    for k, n in (wf.get("nodes") or {}).items():
+        for t in n.get("tools") or []:
+            if _is_closer(t) and "close_sent" not in str(t.get("pre_process_code") or ""):
+                rep.error("nodes." + k, f"closing tool {t['function']['name']!r} has no blocks.close_pre_hook(): the call "
+                                        "may not end before its answer comes back, and close_call goes out twice")
+
+
 def check_close_with_notes(wf, rep):
     """A conversation node must not hold a note tool and the closing tool together: in practice runs close_call went
     out in the same message as add_note and the bank closed first (4 of 30 calls). Use blocks.ready_to_close into a
@@ -396,6 +406,15 @@ def check_walk(wf, rep, every, gates, say_nodes):
     walk_feeding = [k for k in feeding if any(t.get("target_node") in walk_gates for t in nodes[k].get("transitions") or [])]
     done_targets = {t.get("target_node") for g in walk_gates for t in nodes[g].get("transitions") or []
                     if '"offer_state"' in json.dumps(t.get("condition"))}
+    for k in sorted(done_targets - set(gates)):
+        n = nodes.get(k) or {}
+        if n.get("node_type") != "conversation":
+            continue
+        text = str(n.get("task_message") or "") + str((n.get("on_enter") or {}).get("prompt") or "")
+        missing = [v for v in ("offer_summary", "calendar_facts") if "{{" + v + "}}" not in text]
+        if missing:
+            rep.error("nodes." + k, f"the records node does not show {missing}: it needs the summary and the calendar "
+                                    "(fix23-a: without dates it wrote today as 2025-05-14); keep blocks.RECORDS_TASK")
     for k in walk_feeding:
         for t in nodes[k].get("transitions") or []:
             if t.get("target_node") in done_targets and t.get("target_node") not in gates:
@@ -570,6 +589,7 @@ def validate(wf, spec=None, call_vars=None):
     check_offer_gate(wf, rep)
     check_settled_closing(wf, rep)
     check_close_with_notes(wf, rep)
+    check_close_marks_sent(wf, rep)
     check_speakable(wf, rep)
 
     if spec is not None:

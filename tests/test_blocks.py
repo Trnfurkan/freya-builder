@@ -91,14 +91,26 @@ def test_full_workflow_from_blocks_validates(openapi, params_a):
     assert len(unused) == 1 and "schedule_callback" in unused[0]   # left out on purpose: the validator must say so
 
 
-def test_closed_transition_fires_on_any_sign_of_an_answer():
+def test_closed_transition_ends_on_success_on_sent_and_not_on_a_refusal():
+    """raw-a: PUB-06/PUB-10 closed twice (the first answer was late); PUB-05 ended on a refused close."""
     t = b.closed_transition("end")
     conds = t["condition"]["conditions"]
     assert t["target_node"] == "end" and t["condition"]["logic"] == "or"
     assert {"variable": "close_call_success_count", "operator": "greater_than", "operand": 0} in conds
-    assert {"variable": "close_call_response.data.ok", "operator": "is_set"} in conds
     assert {"variable": "close_call_failure_count", "operator": "greater_than", "operand": 1} in conds
     assert {"variable": "call_closed", "operator": "equals", "operand": "yes"} in conds
+    assert {"variable": "close_call_response.data.ok", "operator": "is_set"} not in conds   # a refusal must not end it
+    sent = [c for c in conds if c.get("logic") == "and"][0]["conditions"]
+    assert sent[0] == {"variable": "close_sent", "operator": "equals", "operand": "yes"}
+    alts = sent[1]["conditions"]
+    assert {"variable": "close_call_response.data.ok", "operator": "is_not_set"} in alts
+    assert {"variable": "close_call_response.data.ok", "operator": "equals", "operand": "true"} in alts
+
+
+def test_close_pre_hook_marks_the_close_as_sent():
+    v = {}
+    snippets.run_pre_hook(b.close_pre_hook(), {"outcome": "promise"}, v)
+    assert v == {"close_sent": "yes"}
 
 
 def test_close_post_hook_sets_the_flag_and_asks_for_one_word():
@@ -136,7 +148,7 @@ def test_validator_warns_when_a_turn_cap_skips_the_closing_tool(openapi):
 def test_recommended_pattern_validates_without_closing_warnings(openapi, params_a):
     cid = {"customer_id": "{{customer_id}}"}
     facts = snippets.date_facts_code(no_attempts(params_a))
-    close = ot.api_tool(openapi, "close_call", baked=cid, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(openapi, "close_call", baked=cid, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     promise = ot.api_tool(openapi, "create_promise", baked=cid,
                           pre_hook=snippets.promise_guard_code({"check_dates": True, "check_amount": True}),
                           post_hook=snippets.post_result_code("Recorded.", "Not recorded.", guard_var="promise_guard"))
@@ -177,9 +189,9 @@ def test_failure_rules_without_engine_retries_asks_for_one_retry_with_a_holding_
 def test_outcome_after_a_transfer_pattern_validates(openapi):
     cid = {"customer_id": "{{customer_id}}"}
     others = ["promise", "paid", "no_promise", "not_verified", "not_reached"]
-    close_work = ot.api_tool(openapi, "close_call", baked=cid, enums={"outcome": others}, post_hook=b.close_post_hook(snippets))
+    close_work = ot.api_tool(openapi, "close_call", baked=cid, enums={"outcome": others}, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     close_xfer = ot.api_tool(openapi, "close_call", baked=cid, enums={"outcome": ["transferred"]},
-                             post_hook=b.close_post_hook(snippets))
+                             pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     work = b.conversation("negotiate", "Talk.", tools=[ot.api_tool(openapi, "transfer_to_agent", baked=cid), close_work],
                           transitions=[b.go("after_transfer", "transfer done", b.gt("transfer_to_agent_success_count", 0)),
                                        b.closed_transition("end")],

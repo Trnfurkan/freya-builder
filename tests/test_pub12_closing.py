@@ -93,7 +93,7 @@ def _negotiate(tools, transitions):
 
 
 def _workflow(work):
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=NOTE_MARK)
     return b.workflow("negotiate", [work, b.closing_node("closing", close, "end", extra_tools=[note]),
                                     b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")])
@@ -114,7 +114,7 @@ def test_settled_flag_closing_with_a_note_tool_is_now_rejected():
 # --- closing through a ready-to-close transition (fix14-ab: close_call sent with add_note in 4 of 30 calls) ------
 
 def _ready_workflow(work_tools):
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     work = _negotiate(work_tools, [b.ready_to_close("closing")])
     return b.workflow("negotiate", [work, b.closing_node("closing", close, "end"),
                                     b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")])
@@ -134,7 +134,7 @@ def test_ready_to_close_pattern_validates_and_keeps_close_call_away_from_notes()
 
 def test_validator_rejects_a_note_tool_next_to_close_call():
     note = ot.api_tool(OPENAPI, "add_note", baked=CID)
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     wf = _ready_workflow([note, close])
     assert any("a note tool and the closing tool together" in m for m in _errors(wf))
 
@@ -142,7 +142,7 @@ def test_validator_rejects_a_note_tool_next_to_close_call():
 def test_validator_rejects_close_call_next_to_settling_tools():
     promise = ot.api_tool(OPENAPI, "create_promise", baked=CID, pre_hook=PROMISE_MARK)
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=NOTE_MARK)
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     wf = _workflow(_negotiate([promise, note, close], [b.settled_transition("closing"), b.closed_transition("end")]))
     assert any("next to tools that settle products" in m for m in _errors(wf))
 
@@ -218,7 +218,7 @@ def test_a_gate_for_a_missing_product_asks_nothing():
 
 
 def test_product_gates_validate_in_a_workflow():
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=snippets.mark_product_code({"state": "noted"}))
     gates, to_gates = b.product_offer_loops(3, "negotiate", _gate_code)
     work = _negotiate([note], [b.ready_to_close("closing"), *to_gates])
@@ -244,7 +244,7 @@ def test_without_plans_in_facts_the_prompt_has_no_attempt_amounts_or_dates():
 
 
 def test_validator_wants_plans_out_of_the_prompt_when_a_gate_exists():
-    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, pre_hook=b.close_pre_hook(), post_hook=b.close_post_hook(snippets))
     gates, to_gates = b.product_offer_loops(3, "negotiate", _gate_code)
 
     def wf(policy):

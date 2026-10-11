@@ -167,6 +167,8 @@ def _written_vars(code):
 
 GATE_MARK = "# offer_gate:"
 MARK_MARK = "# mark_product:"
+POSITION_MARK = "# mark_position:"
+WALK_FLAG = '\\"walk\\": true'
 
 
 def _codes(node):
@@ -286,10 +288,53 @@ def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
                 rep.error(where, f"returns with __previous__ and may re-enter {sorted(missing)}, repeating a request "
                                  "without counting it; add them to excluded_nodes")
         for c in _codes(n):
-            if ledger_var in c and GATE_MARK not in c and MARK_MARK not in c:
+            if ledger_var in c and GATE_MARK not in c and MARK_MARK not in c and POSITION_MARK not in c:
                 rep.error(where, f"code writes or reads {ledger_var!r} outside the offer gate and mark hooks")
     if wf.get("initial_node") in say_nodes:
         rep.error("workflow", "the call starts in a request node, before the offer gate")
+    check_walk(wf, rep, every, gates, say_nodes)
+
+
+def _reply_targets(node):
+    """{reply value: target} for transitions that test one reply value (offer_walk / offer_loop request nodes)."""
+    out = dict()
+    for t in node.get("transitions") or []:
+        for c in (t.get("condition") or {}).get("conditions") or []:
+            if c.get("operator") == "equals" and isinstance(c.get("operand"), str):
+                out.setdefault(c["operand"], t.get("target_node"))
+    return out
+
+
+def check_walk(wf, rep, every, gates, say_nodes):
+    """The controlled offer flow (blocks.offer_walk): every answer to a request that is a yes or a no goes back into a
+    gate, so the gate counts and moves on; the working node never sees the plan; and what cannot be proven from the
+    graph (free text of the model in a node that leads into the flow) is reported as a warning."""
+    nodes = {k: n for k, n, _ in every}
+    walk_gates = {g for g in gates if any(WALK_FLAG in c for c in _codes(nodes.get(g, {})))}
+    for s_node in say_nodes:
+        feeders = [k for k, n, _ in every if s_node in [t.get("target_node") for t in n.get("transitions") or []]
+                   + [n.get("passthrough_default_transition")]]
+        if not any(f in walk_gates for f in feeders):
+            continue
+        targets = _reply_targets(nodes.get(s_node, {}))
+        for answer in ("accepted", "refused"):
+            if targets.get(answer) not in gates:
+                rep.error("nodes." + s_node, f"in the walk, a {answer!r} answer must go back into the offer gate "
+                                             f"(goes to {targets.get(answer)!r}): only the gate counts and moves on")
+    if not gates:
+        return
+    for k, n, _ in every:
+        texts = " ".join(str(n.get(f, "")) for f in ("task_message", "loop_prompt", "role_message", "routing_prompt"))
+        texts += " " + str((n.get("on_enter") or {}).get("prompt", "")) + " " + str((n.get("on_enter") or {}).get("text", ""))
+        if "{{offer_plan" in texts:
+            rep.error("nodes." + k, "shows the persuasion plan to the model ({{offer_plan...}}): the offer gate words "
+                                    "the requests; a model that sees the plan asks it itself")
+    feeding = sorted(k for k, n, _ in every if n.get("node_type") == "conversation" and k not in say_nodes
+                     and any(t.get("target_node") in gates for t in n.get("transitions") or []))
+    for k in feeding:
+        rep.warn("nodes." + k, "not provable from the graph: this node's model writes free text, and a payment request "
+                               "it words itself would not be counted (there is no documented output filter); keep "
+                               "amounts and plans out of its prompt and let the offer gate walk the products")
 
 
 def validate(wf, spec=None, call_vars=None):

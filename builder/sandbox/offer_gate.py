@@ -72,6 +72,7 @@ def decide(vars, p):
     cur = ledger.get("current") or ""
     if cur and reply == "accepted":
         state[cur] = "agreed"
+        ledger.setdefault("agreed", dict())[cur] = ledger.get("step") or dict()   # the request's own amount and date
     elif cur and reply == "refused" and int(counts.get(cur, 0)) >= len(plans.get(cur) or []):
         state[cur] = "refused"
 
@@ -100,13 +101,20 @@ def decide(vars, p):
         vars["offer_product"] = pick
         vars["offer_state"] = "offer"
         ledger["current"] = pick
+        ledger["step"] = dict(amount=amount, date=step.get("date", ""))
     else:
         used = [pid for pid in order if int(counts.get(pid, 0)) >= len(plans.get(pid) or []) and state.get(pid, "open") in ("open", "refused")]
         vars["offer_line"] = ""
         vars["offer_product"] = ""
         vars["offer_state"] = "done"
-        vars["offer_summary"] = ("No payment request is allowed now. All persuasion attempts are used for: "
-                                 + (", ".join(used) if used else "none") + ". Make no further request for those products.")
+        terms = ledger.get("agreed") or dict()
+        agreed = [pid + (" (" + str(terms[pid].get("amount", "")) + " on " + str(terms[pid].get("date", "")) + ")"
+                         if terms.get(pid) else " (as the customer said)")
+                  for pid in order if state.get(pid) == "agreed"]
+        vars["offer_summary"] = ("No payment request is allowed now. Agreed: " + (", ".join(agreed) if agreed else "none")
+                                 + ". All persuasion attempts are used for: " + (", ".join(used) if used else "none")
+                                 + ". Make no further request for any product; go on with the read-back, the records "
+                                   "and the notes.")
         ledger["current"] = ""
     vars[lv] = json.dumps(ledger)
 

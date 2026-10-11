@@ -341,6 +341,41 @@ def offer_loop(gate_name, say_name, back_node, gate_code, *, reply_var="offer_re
     return [gate, request]
 
 
+# The walk: one controlled offer flow for all products ------------------------------------------------------------
+# Seen in practice runs (fix16-ab PUB-12): the working node went through the products itself and asked "can you pay
+# that today?" for each one before taking it to its gate; those requests were never counted (3 where 2 were allowed,
+# 2 where 1 was allowed). So the working node no longer goes through the products: the gate does. A request is
+# answered into the gate (accepted or refused), never into the working node; the gate counts, records an accepted
+# request's amount and date, and moves on to the next open product by itself. The working node is entered only when
+# the customer says something else, and when the walk is done (offer_summary lists what was agreed and refused).
+
+def offer_walk(gate_name, say_name, back_node, gate_code, *, reply_var="offer_reply", max_turns=3):
+    """[gate node, request node] for the walk. gate_code: snippets.offer_gate_code({..., "walk": True}).
+    Accepted and refused answers go back into the gate; only other answers go to the working node."""
+    gate, request = offer_loop(gate_name, say_name, back_node, gate_code, reply_var=reply_var, max_turns=max_turns)
+    request["transitions"] = [
+        go(gate_name, "the customer accepted the request: the gate records it and goes on", eq(reply_var, "accepted")),
+        go(gate_name, "the customer refused: the gate decides the next request, if any", eq(reply_var, "refused")),
+        go(back_node, "the customer said something else", eq(reply_var, "other"))]
+    return [gate, request]
+
+
+def agreed_marks(max_products, back_node, snippets, *, prefix="mark_agreed_"):
+    """For each product position k (1..the brief's most products per customer): a code node that marks product k as
+    agreed in the offer ledger, and the tool-call transition the working node takes when the customer agreed an
+    amount and a date for product k in their own words. Returns (nodes, transitions); the nodes go back to back_node.
+    Code nodes run one at a time, so these writes cannot be lost the way parallel tool hooks lost theirs."""
+    nodes, transitions = [], []
+    for k in range(1, int(max_products) + 1):
+        name = f"{prefix}{k}"
+        nodes.append(code_node(name, snippets.build("mark_position", {"product_index": k}), back_node))
+        when = (f"The customer has agreed an amount and a date for product number {k} (Product {k} in the product "
+                "facts) in their own words: mark it so that no payment request is made for it.")
+        transitions.append({"target_node": name, "description": when, "is_tool_call": True,
+                            "condition": {"operator": "matches_intent", "description": when}})
+    return nodes, transitions
+
+
 def product_offer_loops(max_products, back_node, gate_code_for, *, gate_prefix="offer_gate_",
                         say_prefix="offer_request_", reply_var="offer_reply"):
     """One gate and one request node per product position (1..max_products, the brief's most products per customer).

@@ -173,15 +173,21 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   "after every promise and note result has come back ok, take the transition to close; the closing node says goodbye
   and calls close_call". Transfers keep `outcome_after`, turn caps keep `wrap_up_node`. Nothing here depends on
   variables written by hooks.
-- **Several products: one gate per product (required when the brief allows more than one product).** Use
-  `nodes, to_gates = blocks.product_offer_loops(<the brief's most products per customer>, <working node>, lambda k:
-  snippets.offer_gate_code({..., "product_index": k}))`, add `nodes` to the workflow and `to_gates` to the working
-  node's transitions instead of one `offer_loop` / `to_gate`. The prompt says: "after a flat refusal of product number
-  k, take the transition to the offer gate for product k". With one gate for all products (fix14-ab PUB-12, 3 of 3
-  runs) a refusal of the personal loan made the gate ask again for the card the customer had agreed, and the agent then
-  asked for the loan itself: 3 or 4 requests where 2 were allowed. Exclude every request node from global nodes.
-  Do NOT use `offer_gate_code(settled_var=...)` with `blocks.settled_products_extraction()` either: in a practice call
-  the extraction marked a refused loan as agreed and the gate skipped its second allowed request.
+- **All payment requests through one controlled flow: the walk (required when the brief limits requests).** Build
+  `blocks.offer_walk("offer_gate", "offer_request", <working node>, snippets.offer_gate_code({..., "walk": True}))`
+  and `marks, to_marks = blocks.agreed_marks(<the brief's most products per customer>, <working node>, snippets)`;
+  add the nodes, and give the working node `blocks.to_gate("offer_gate")` and `to_marks`. The gate goes through the
+  products by itself in get_account order: it counts every request before it is said, answers "accepted" and
+  "refused" go back into the gate (never to the working node), it records an accepted request's amount and date, and
+  moves on to the next open product. The working node is entered only for other answers and when the walk is done
+  (`{{offer_summary}}` lists what was agreed, with amounts and dates, and what was refused). The working node's prompt
+  says: state the debt and ask the brief's first question; never ask for a payment for any product yourself (not
+  "today", not an amount, not a date); when the customer agreed an amount and a date for product k in their own words,
+  take the mark transition for product k; to go on, take the transition to the offer gate. Fix16-ab PUB-12: with the
+  working node going through the products, it asked "can you pay that today?" for each product before its gate (3
+  requests where 2 were allowed, 2 where 1). The validator rejects a yes/no answer that skips the gate, a plan shown
+  to the model and a ledger write outside the gate and mark nodes, and warns that the model's free text cannot be
+  proven from the graph (Freya documents no output filter).
 - **Persuasion plans are read, not counted.** If the brief has persuasion attempts per band, put them in
   `date_params.json` as `attempt_offers` (in order, each an amount and a date token, keys at the top of
   `builder/sandbox/date_facts.py`). Each product then gets its own plan, with exactly as many attempts as its band

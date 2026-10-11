@@ -548,12 +548,21 @@ def failure_rules(tool, final_line, *, engine_retries=0, then="", holding_line="
 
 # Workflow -------------------------------------------------------------------------------------------------------
 
+NO_UNBACKED_ACTIONS = ("Never say that you will do, or have done, anything on the account that none of your tools does "
+                       "(a note, a flag, an update, a reminder or a message): when no tool does it, do not mention it. "
+                       "Sentences your instructions give you word for word are always allowed.")
+
+
 def workflow(initial, nodes, *, system_prompt="", global_nodes=(), test_variables=None, lifecycle_tools=()):
+    """The workflow dict. NO_UNBACKED_ACTIONS is added to every system prompt: in a practice run (raw-a2 PUB-05) the
+    agent told a hardship customer "I will note this on your account" in a brief with no note tool."""
     by_name = {}
     for n in nodes:
         if n["name"] in by_name:
             raise ValueError(f"duplicate node {n['name']}")
         by_name[n["name"]] = n
+    if NO_UNBACKED_ACTIONS not in system_prompt:
+        system_prompt = (system_prompt.rstrip() + "\n\n" + NO_UNBACKED_ACTIONS).strip()
     wf = {"initial_node": initial, "system_prompt": system_prompt, "nodes": by_name,
           "global_nodes": {g["name"]: g for g in global_nodes}}
     if test_variables:

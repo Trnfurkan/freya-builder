@@ -53,6 +53,17 @@ def test_global_node_passthrough_with_fixed_line():
     assert "passthrough" not in g2
 
 
+def test_workflow_adds_the_no_unbacked_actions_rule_once():
+    wf = b.workflow("a", [b.end_node("a")], system_prompt="Be brief.")
+    assert wf["system_prompt"].startswith("Be brief.") and wf["system_prompt"].count(b.NO_UNBACKED_ACTIONS) == 1
+    again = b.workflow("a", [b.end_node("a")], system_prompt=wf["system_prompt"])
+    assert again["system_prompt"] == wf["system_prompt"]
+    assert b.workflow("a", [b.end_node("a")])["system_prompt"] == b.NO_UNBACKED_ACTIONS
+    assert not [i for i in validate(wf).items if i[1] == "workflow.system_prompt"]
+    wf["system_prompt"] = "Be brief."
+    assert [i for i in validate(wf).items if i[0] == "WARN" and i[1] == "workflow.system_prompt"]
+
+
 def test_duplicate_nodes_rejected():
     with pytest.raises(ValueError):
         b.workflow("a", [b.end_node("a"), b.end_node("a")])

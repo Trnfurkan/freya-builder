@@ -447,6 +447,10 @@ def validate(wf, spec=None, call_vars=None):
     _nulls(wf, "workflow", rep)
     if "agent_config" in wf:
         rep.warn("workflow", "agent_config is present; the kit says to leave it out")
+    if "none of your tools does" not in str(wf.get("system_prompt") or ""):
+        rep.warn("workflow.system_prompt", "no blocks.NO_UNBACKED_ACTIONS: a practice agent (raw-a2 PUB-05) said it "
+                                           "would note something on the account with no note tool; build with "
+                                           "blocks.workflow, which adds it")
     nodes, globals_ = wf.get("nodes") or {}, wf.get("global_nodes") or {}
     if not nodes:
         rep.error("workflow", "no nodes")

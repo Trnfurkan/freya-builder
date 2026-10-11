@@ -72,6 +72,10 @@ brief files and the tool API file. Never use a value, name, phrase or rule from 
      "verified", "set_var": "verified_fields", "need": <the brief's number of questions>, "flag": "identity_passed"})`,
      and route with `blocks.identity_passed(<account node>, <the service's all-passed field>)` (raw-a PUB-05: the
      service left out all_verified, both answers were verified, and the call never left the identity node).
+   - **Every identity answer goes to the identity tool,** also one that comes with a question, a complaint or a demand
+     ("21 July 1990. How much do I owe?"): say so in the identity tool's description and the identity node's task. Only
+     the tool's answer counts wrong answers (raw-a2 PUB-03: the third wrong answer came with a question, was never sent,
+     the agent asked a fourth time and closed as declined instead of failed).
    - **Closing, always this pattern** (practice runs showed agents looping after closing, and turn caps hanging up without
      the closing call): pre-hook `blocks.close_pre_hook()` and post-hook `blocks.close_post_hook(snippets)` on the closing
      tool (the validator requires both; raw-a: a late answer let close_call go out twice); `blocks.closed_transition(<end>)`
@@ -99,8 +103,13 @@ brief files and the tool API file. Never use a value, name, phrase or rule from 
      rebuilt. Note in summary.md which version each practice run tested and its score.
    - Results move between runs of the same agent. A change is better only if it fixes a failure without new ones; one
      run that drops from 10 to 8 after a change is a reason to doubt the change.
-   - **Never finish on an untested change.** If the last saved version has not had a practice run, and the previous
-     tested version scored at least as well as you can show for the new one, rebuild and save the best tested version.
+   - **Never finish on an untested change.** If the last saved version has not had a practice run, rebuild and save the
+     best tested version (`out/<slot>/v<n>_build_workflow.py`). There is no exception: not for a fix you are sure of, not
+     because no practice run is left, not because the platform is failing. A practice build (raw-a2) kept an untested
+     version for a fix it was sure of; a change that breaks one node can fail every customer, a known bug fails one.
+     So plan the runs: never save a change after the last practice run you can still start. A run where every call
+     ended with no tool call and a platform error (504, a model that never answered) tested nothing: the version it
+     ran counts as untested.
 
 9. **Finish** with `out/<slot>/summary.md` (workflow_id, agent_id, saved version and which test it had, open risks) and
    one line: workflow_id, agent_id and the last result.
@@ -257,7 +266,9 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   allowed, and what to offer instead); the rule for vague answers no longer applies. Say this in the prompt next to the
   date and amount rules. Practice agents kept applying the vague rule after the customer had named a day.
 - **Honesty.** The agent says something is recorded, booked or transferred only after the tool result says so. The
-  tool-result instruction tells it exactly what to say on failure.
+  tool-result instruction tells it exactly what to say on failure. It never mentions an action no tool does ("I will
+  note this on your account" with no note tool, seen in raw-a2 PUB-05): `blocks.workflow` adds `NO_UNBACKED_ACTIONS` to
+  the system prompt; keep it, and never write such a sentence into a node prompt yourself.
 - **Tool failures.** When the bank answers with an HTTP error, the platform reports a `function_call_error`: the tool's
   post-hook does not run, so nothing in `post_result_code` reaches the model. In practice runs the agent then apologised
   for "a technical error", said goodbye and closed, every time, though the brief allowed another try. So:

@@ -167,12 +167,15 @@ def test_6_promise_calls_have_their_own_counter_and_no_duplicate():
 def walk_workflow(**changes):
     close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
     note = ot.api_tool(OPENAPI, "add_note", baked=CID, pre_hook=snippets.mark_product_code({"state": "noted"}))
+    promise = ot.api_tool(OPENAPI, "create_promise", baked=CID,
+                          pre_hook=snippets.promise_guard_code({"check_dates": True, "max_attempts": 2}))
     marks, to_marks = b.agreed_marks(3, "negotiate", snippets)
-    work = b.conversation("negotiate", changes.get("task", "{{product_facts}} {{offer_summary}}"), tools=[note],
-                          transitions=[b.ready_to_close("closing"), b.to_gate("offer_gate"), *to_marks],
+    work = b.conversation("negotiate", changes.get("task", "{{product_facts}}"), tools=[],
+                          transitions=[b.to_records("records"), b.to_gate("offer_gate"), *to_marks],
                           max_turns=40, max_turn_target="wrap_up")
     nodes = [b.code_node("facts", snippets.date_facts_code(changes.get("policy", POLICY)), "negotiate"), work,
-             *b.offer_walk("offer_gate", "offer_request", "negotiate", WALK), *marks,
+             *b.offer_walk("offer_gate", "offer_request", "negotiate", WALK, done_target="records"), *marks,
+             b.records_node("records", [promise, note], "closing"),
              b.closing_node("closing", close, "end"), b.wrap_up_node("wrap_up", close, "end"), b.end_node("end")]
     return b.workflow("facts", nodes)
 
@@ -187,7 +190,7 @@ def test_the_walk_validates_and_answers_go_into_the_gate():
     errors, warnings = report(wf)
     assert errors == []
     req = wf["nodes"]["offer_request"]
-    assert [t["target_node"] for t in req["transitions"]] == ["offer_gate", "offer_gate", "negotiate"]
+    assert [t["target_node"] for t in req["transitions"]] == ["offer_gate", "offer_gate", "offer_gate", "negotiate"]
     assert any("not provable from the graph" in w for w in warnings)   # the model's free text is reported, not hidden
     assert all(wf["nodes"][f"mark_agreed_{k}"]["passthrough_default_transition"] == "negotiate" for k in (1, 2, 3))
 
@@ -229,3 +232,103 @@ def test_validator_rejects_limits_counted_only_at_the_bank():
                               b.closing_node("closing", close, "end"), b.wrap_up_node("wrap_up", close, "end"),
                               b.end_node("end")])
     assert any("no offer gate" in m for m in report(wf)[0])
+
+
+# --- fix17-ab: after done, no new offer; too_much per product; no early close -------------------------------------
+
+def test_after_done_no_node_that_can_offer_is_reachable():
+    wf = walk_workflow()
+    assert report(wf)[0] == []
+    gate_done = [t for t in wf["nodes"]["offer_gate"]["transitions"] if t["target_node"] != "offer_request"]
+    assert [t["target_node"] for t in gate_done] == ["records"]
+    records = wf["nodes"]["records"]
+    assert [t["target_node"] for t in records["transitions"]] == ["closing"]          # no way back
+    assert [t["function"]["name"] for t in records["tools"]] == ["create_promise", "add_note"]
+
+
+def test_validator_rejects_done_into_the_working_node():
+    """fix17-ab v2 message 17: done went back to 'work', which made up a car loan offer."""
+    wf = walk_workflow()
+    for t in wf["nodes"]["offer_gate"]["transitions"]:
+        if t["target_node"] == "records":
+            t["target_node"] = "negotiate"
+    assert any("after the walk is done" in m for m in report(wf)[0])
+
+
+def test_validator_rejects_a_records_node_that_leads_back_to_an_offer():
+    wf = walk_workflow()
+    wf["nodes"]["records"]["transitions"].append(b.to_gate("offer_gate"))
+    assert any("after the walk is done" in m for m in report(wf)[0])
+
+
+def test_too_much_only_when_said_and_only_for_that_product():
+    v = start()
+    v["full_too_much"] = "yes"                        # a call-wide flag (fix17-ab) is not read in the walk
+    mark(v, 1)
+    enter_gate(v)
+    plans = json.loads(v["offer_plans"])["plans"]
+    assert v["offer_line"].count(plans["p2"][0]["amount"]) == 1        # attempt 1: the full amount, not the floor
+    state, pid = enter_gate(v, "refused")                              # a plain no is not too_much
+    assert "too_much" not in led(v) and pid == "p2"
+    v2 = start()
+    mark(v2, 1)
+    enter_gate(v2)
+    enter_gate(v2, "too_much")                                         # said about p2 only
+    assert led(v2)["too_much"] == {"p2": True}
+    while v2["offer_product"] == "p2":
+        enter_gate(v2, "refused")
+    assert v2["offer_product"] == "p3" and plans["p3"][0]["amount"] in v2["offer_line"]   # p3 keeps its full amount
+
+
+def test_too_much_with_no_attempt_left_offers_nothing_more():
+    v = start("PUB-12")
+    mark(v, 1)
+    mark(v, 2)                                                         # only the car loan (early band, 1 attempt) open
+    assert enter_gate(v) == ("offer", "p3")
+    assert enter_gate(v, "too_much") == ("done", "")
+    assert led(v)["state"]["p3"] == "refused" and led(v)["counts"]["p3"] == limit("PUB-12", "p3")
+
+
+def test_too_much_uses_the_floor_when_the_plan_allows_it():
+    """Brief A rule 30: attempt 1 is for the floor if the customer already said the full amount is too much."""
+    v = start("PUB-06")                                               # one late credit card
+    enter_gate(v)
+    step = json.loads(v["offer_plans"])["plans"]["p1"]
+    enter_gate(v, "too_much")
+    assert step[1]["amount"] in v["offer_line"]                        # attempt 2: the floor on the deadline
+    assert led(v)["counts"]["p1"] == 2 == limit("PUB-06", "p1")
+
+
+def test_the_reply_classes_keep_a_plain_no_out_of_too_much():
+    req = walk_workflow()["nodes"]["offer_request"]
+    e = req["extraction_schema"][0]
+    assert e["enum_values"] == ["accepted", "too_much", "refused", "other"]
+    assert "a plain no is refused, never too_much" in e["description"]
+
+
+def test_card_agreed_then_both_loans_refused_gives_the_records_summary():
+    """PUB-12: card agreed in the customer's words (mark_agreed_1), loans refused after their requests."""
+    v = start()
+    mark(v, 1)
+    assert refuse_everything(v) == ["p2", "p2", "p3"]
+    summary = v["offer_summary"]
+    assert "Agreed: p1 (as the customer said)" in summary and "used for: p2, p3" in summary
+
+
+def test_no_early_close_from_the_working_node():
+    wf = walk_workflow()
+    wf["nodes"]["negotiate"]["transitions"].insert(0, b.ready_to_close("closing"))
+    assert any("can go straight to 'closing'" in m for m in report(wf)[0])
+    wf = walk_workflow()
+    close = wf["nodes"]["closing"]["tools"][0]
+    wf["nodes"]["negotiate"]["tools"] = [close]
+    assert any("holds the closing tool" in m for m in report(wf)[0])
+
+
+def test_closing_and_records_have_speakable_content():
+    wf = walk_workflow()
+    for k in ("records", "closing"):
+        oe = wf["nodes"][k]["on_enter"]
+        assert oe["type"] == "llm" and oe["prompt"].strip()
+    wf["nodes"]["closing"]["on_enter"]["prompt"] = ""
+    assert any("on_enter llm without a prompt" in m for m in report(wf)[0])

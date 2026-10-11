@@ -349,15 +349,63 @@ def offer_loop(gate_name, say_name, back_node, gate_code, *, reply_var="offer_re
 # request's amount and date, and moves on to the next open product by itself. The working node is entered only when
 # the customer says something else, and when the walk is done (offer_summary lists what was agreed and refused).
 
-def offer_walk(gate_name, say_name, back_node, gate_code, *, reply_var="offer_reply", max_turns=3):
+WALK_REPLY = ("The customer's answer to the payment request just made, about this product only: accepted (agrees to "
+              "exactly that amount and date); too_much (says in so many words that this amount is too high, too much or "
+              "more than they can afford); refused (says no, will not or cannot pay, without saying the amount is too "
+              "high and without proposing anything: a plain no is refused, never too_much); other (proposes their own "
+              "date or amount, asks a question, hesitates, or mentions illness, job loss, a death, a dispute, a payment "
+              "already made, a new plan, a human, or anything else).")
+
+
+def offer_walk(gate_name, say_name, back_node, gate_code, *, done_target=None, reply_var="offer_reply", max_turns=3):
     """[gate node, request node] for the walk. gate_code: snippets.offer_gate_code({..., "walk": True}).
-    Accepted and refused answers go back into the gate; only other answers go to the working node."""
-    gate, request = offer_loop(gate_name, say_name, back_node, gate_code, reply_var=reply_var, max_turns=max_turns)
-    request["transitions"] = [
-        go(gate_name, "the customer accepted the request: the gate records it and goes on", eq(reply_var, "accepted")),
-        go(gate_name, "the customer refused: the gate decides the next request, if any", eq(reply_var, "refused")),
-        go(back_node, "the customer said something else", eq(reply_var, "other"))]
+    Accepted, too_much and refused answers go back into the gate; only other answers go to the working node.
+    done_target: where the gate goes when no request is allowed any more: a records node (blocks.records_node) that
+    has no way back to any request. Without it the gate returns to back_node (not allowed by the validator in a walk:
+    in fix17-ab the working node made up a new offer after the gate said done)."""
+    gate = code_node(gate_name, gate_code, say_name,
+                     transitions=[go(done_target or back_node, "no payment request is allowed now",
+                                     eq("offer_state", "done"))])
+    task = ("You have just made the payment request above. Do not make any other request or offer, do not name any other "
+            "amount or date, and call no tool. If the customer asks a question, answer it in one short sentence and then "
+            "repeat the request word for word.")
+    request = conversation(
+        say_name, task, on_enter=say(OFFER_LINE),
+        extraction=[extract(reply_var, "string", WALK_REPLY, enum=["accepted", "too_much", "refused", "other"],
+                            min_confidence=0.6)],
+        transitions=[go(gate_name, "the customer accepted the request: the gate records it and goes on", eq(reply_var, "accepted")),
+                     go(gate_name, "the amount is too much for this product: the gate decides", eq(reply_var, "too_much")),
+                     go(gate_name, "the customer refused: the gate decides the next request, if any", eq(reply_var, "refused")),
+                     go(back_node, "the customer said something else", eq(reply_var, "other"))],
+        max_turns=max_turns, max_turn_target=back_node)
     return [gate, request]
+
+
+RECORDS_TASK = ("No payment request is allowed any more and you never make one: never name an amount or a date that is "
+                "not in the summary below, never ask whether the customer can pay. The summary: {{offer_summary}}\n"
+                "Do only this, in order: read back together every agreed promise (product, amount, date) and ask \"Do "
+                "you confirm?\"; after a clear yes call create_promise once per agreed product, one call per message; "
+                "then call add_note once for each product without a recorded promise, one call per message, waiting for "
+                "each result; then take the transition to close. If a write fails, follow its result; never say a "
+                "promise is recorded without a result with ok true.")
+
+
+def records_node(name, tools, closing_target, *, task=None, max_turns=20, max_turn_target=None):
+    """Where the walk ends (offer_walk done_target) and where the working node goes when nothing is left to ask
+    (to_records): read-back, records and notes, then ready_to_close. It has no transition to any gate, request or
+    working node, so no path leads from here to a new payment request (the validator checks the graph)."""
+    task = task or RECORDS_TASK
+    return conversation(name, task, tools=list(tools), on_enter=llm("Speak now, in words: " + task),
+                        transitions=[ready_to_close(closing_target)], max_turns=max_turns,
+                        max_turn_target=max_turn_target or closing_target)
+
+
+def to_records(records_name, when="Nothing is left to ask: every product is agreed, refused after its requests, or "
+                                  "settled another way (paid, dispute, hardship). Go on to the read-back, records and "
+                                  "notes."):
+    """Tool-call transition from the working node to the records node (the working node has no closing path)."""
+    return {"target_node": records_name, "description": when, "is_tool_call": True,
+            "condition": {"operator": "matches_intent", "description": when}}
 
 
 def agreed_marks(max_products, back_node, snippets, *, prefix="mark_agreed_"):

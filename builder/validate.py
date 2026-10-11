@@ -295,6 +295,19 @@ def check_offer_gate(wf, rep, ledger_var="offer_ledger"):
     check_walk(wf, rep, every, gates, say_nodes)
 
 
+def check_speakable(wf, rep):
+    """Every conversation node must give the model something to say: an on_enter llm needs its prompt, a tts its
+    text. In a practice run (fix17-ab) the closing node produced "The model returned no speakable content"."""
+    for k, n in (wf.get("nodes") or {}).items():
+        if n.get("node_type") != "conversation":
+            continue
+        oe = n.get("on_enter") or {}
+        if oe.get("type") == "llm" and not str(oe.get("prompt") or "").strip():
+            rep.error("nodes." + k, "on_enter llm without a prompt: the model may return nothing speakable")
+        if oe.get("type") == "tts" and not str(oe.get("text") or "").strip():
+            rep.error("nodes." + k, "on_enter tts without text")
+
+
 def _reply_targets(node):
     """{reply value: target} for transitions that test one reply value (offer_walk / offer_loop request nodes)."""
     out = dict()
@@ -331,6 +344,39 @@ def check_walk(wf, rep, every, gates, say_nodes):
                                     "the requests; a model that sees the plan asks it itself")
     feeding = sorted(k for k, n, _ in every if n.get("node_type") == "conversation" and k not in say_nodes
                      and any(t.get("target_node") in gates for t in n.get("transitions") or []))
+    marks = {k for k, n, _ in every if any(POSITION_MARK in c for c in _codes(n))}
+    offering = set(gates) | set(say_nodes) | set(feeding) | marks
+    for g in sorted(walk_gates):
+        for t in nodes[g].get("transitions") or []:
+            if '"offer_state"' not in json.dumps(t.get("condition")):
+                continue
+            start = t.get("target_node")
+            seen, todo = set(), [start]
+            while todo:
+                k = todo.pop()
+                if k in seen or k not in nodes:
+                    continue
+                seen.add(k)
+                n = nodes[k]
+                todo += [x.get("target_node") for x in n.get("transitions") or []]
+                todo += [n.get("passthrough_default_transition"), n.get("max_turn_transition")]
+            hit = sorted(seen & offering)
+            if hit:
+                rep.error("nodes." + g, f"after the walk is done (to {start!r}) the call can reach {hit}, which can "
+                                        "make a new payment request: send done to blocks.records_node, which has no "
+                                        "way back")
+    closers = {k for k, n, _ in every if any("call_closed" in str(x.get("post_process_code") or "")
+                                             for x in n.get("tools") or [])}
+    walk_feeding = [k for k in feeding if any(t.get("target_node") in walk_gates for t in nodes[k].get("transitions") or [])]
+    for k in walk_feeding:
+        n = nodes[k]
+        if k in closers:
+            rep.error("nodes." + k, "the working node of the walk holds the closing tool: it could close before the "
+                                    "records and notes; close only from the records node")
+        for t in n.get("transitions") or []:
+            if t.get("is_tool_call") and t.get("target_node") in closers:
+                rep.error("nodes." + k, f"the working node can go straight to {t.get('target_node')!r}, which closes, "
+                                        "before the records and notes: use blocks.to_records")
     for k in feeding:
         rep.warn("nodes." + k, "not provable from the graph: this node's model writes free text, and a payment request "
                                "it words itself would not be counted (there is no documented output filter); keep "
@@ -490,6 +536,7 @@ def validate(wf, spec=None, call_vars=None):
     check_offer_gate(wf, rep)
     check_settled_closing(wf, rep)
     check_close_with_notes(wf, rep)
+    check_speakable(wf, rep)
 
     if spec is not None:
         used = set()

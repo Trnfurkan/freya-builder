@@ -175,8 +175,14 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   variables written by hooks.
 - **All payment requests through one controlled flow: the walk (required when the brief limits requests).** Build
   `blocks.offer_walk("offer_gate", "offer_request", <working node>, snippets.offer_gate_code({..., "walk": True}))`
-  and `marks, to_marks = blocks.agreed_marks(<the brief's most products per customer>, <working node>, snippets)`;
-  add the nodes, and give the working node `blocks.to_gate("offer_gate")` and `to_marks`. The gate goes through the
+  with `done_target="records"`, and `marks, to_marks = blocks.agreed_marks(<the brief's most products per customer>,
+  <working node>, snippets)`; add the nodes, `blocks.records_node("records", [<promise tool>, <note tool>],
+  "closing")` and `blocks.closing_node("closing", <close tool>, <end>)`, and give the working node
+  `blocks.to_records("records")`, `blocks.to_gate("offer_gate")` and `to_marks`, and no closing tool or closing
+  transition (transfers keep `outcome_after`, turn caps `wrap_up_node`). The records node is the only way to a
+  normal close; it has no way back to any request (fix17-ab: when the gate's done went back to the working node, it
+  made up a new car loan offer). The request node's answers include `too_much`, kept per product by the gate; do not
+  add a call-wide "full amount is too much" extraction in the walk (fix17-ab: it turned yes on a plain no). The gate goes through the
   products by itself in get_account order: it counts every request before it is said, answers "accepted" and
   "refused" go back into the gate (never to the working node), it records an accepted request's amount and date, and
   moves on to the next open product. The working node is entered only for other answers and when the walk is done

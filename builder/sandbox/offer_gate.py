@@ -25,6 +25,10 @@
 #                      gate for all products, a refusal of the personal loan made the gate ask again for the card the
 #                      customer had already agreed, and the agent then asked for the loan itself: 3-4 requests where
 #                      the brief allowed 2.
+#   walk               true for blocks.offer_walk: the request node's answer may also be "too_much" (said about this
+#                      product only), kept per product in the ledger; alt_flag_var is not used. Seen in a practice
+#                      run (fix17-ab): one call-wide "full amount is too much" extraction turned yes on a plain no, and
+#                      every product got its floor as attempt 1.
 #   settled_var        optional: variable with comma-separated product_ids the customer already agreed or settled
 #                      (blocks.settled_products_extraction()); an open product listed there is never asked again
 import json
@@ -73,6 +77,12 @@ def decide(vars, p):
     if cur and reply == "accepted":
         state[cur] = "agreed"
         ledger.setdefault("agreed", dict())[cur] = ledger.get("step") or dict()   # the request's own amount and date
+    elif cur and reply == "too_much":
+        # The customer said this product's full amount is too much: remembered for this product only. Its next
+        # attempt, if the plan has one left, uses the floor where the brief's offer allows it (full_or_floor).
+        ledger.setdefault("too_much", dict())[cur] = True
+        if int(counts.get(cur, 0)) >= len(plans.get(cur) or []):
+            state[cur] = "refused"
     elif cur and reply == "refused" and int(counts.get(cur, 0)) >= len(plans.get(cur) or []):
         state[cur] = "refused"
 
@@ -92,7 +102,11 @@ def decide(vars, p):
         step = plans[pick][n]
         counts[pick] = n + 1                        # counted now: the next node says this line word for word
         amount = step.get("amount", "")
-        if step.get("alt_amount") and str(vars.get(p.get("alt_flag_var") or "full_too_much") or "").lower() == "yes":
+        if p.get("walk"):   # per product, from the request node's own answers, never from another product
+            too_much = bool((ledger.get("too_much") or dict()).get(pick))
+        else:
+            too_much = str(vars.get(p.get("alt_flag_var") or "full_too_much") or "").lower() == "yes"
+        if step.get("alt_amount") and too_much:
             amount = step.get("alt_amount")
         prod = products.get(pick) or dict()
         label_t = (p.get("product_labels") or dict()).get(prod.get("type", ""), "") or str(prod.get("type", pick)).replace("_", " ")

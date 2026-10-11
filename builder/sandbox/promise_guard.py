@@ -5,7 +5,8 @@
 #   - the amount is from the floor up to the full amount, both included (check_amount).
 # A request that breaks a rule is not allowed to record anything: the product id is blanked, so the bank rejects it
 # without a promise, and `vars[guard_var]` holds the reason for the post-hook (post_result.py, guard_var) to tell the
-# model. When the rules are missing or empty it lets everything through: the bank stays the judge.
+# model. When the rules are missing or empty it lets everything through: the bank stays the judge. The exception:
+# vars["product_count"] is "0" (date_facts.py ran and the account had no product, so it did not load): then it blocks.
 # Rules for this file: only json, re and datetime; never raise; no double braces.
 #
 # PARAMS keys:
@@ -166,6 +167,12 @@ try:
         _seen = _iso(vars.get(PARAMS.get("spoken_var"))) if PARAMS.get("spoken_var") else ""
         _pid = str(_b.get(PARAMS.get("product_key") or "product_id") or "")
         _why = check(_b, _rules(vars), PARAMS, _named, _seen)
+        if not _why and not _rules(vars) and str(vars.get("product_count")) == "0":
+            # date_facts.py ran and found no product: the account did not load. Seen in a practice run (raw-a2
+            # PUB-07): get_account never answered, and the agent sent a made-up product id and amount.
+            _why = ("the account data did not load, so the customer's products are unknown. Never name a product, an "
+                    "amount or a date that no tool result gave; follow your rule for a promise that could not be "
+                    "recorded.")
         _max = int(PARAMS.get("max_attempts") or 0)
         try:
             _att = json.loads(vars.get("promise_attempts") or "{}") if not isinstance(vars.get("promise_attempts"), dict) else vars.get("promise_attempts")

@@ -125,6 +125,11 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   passed) goes in `pre_actions` of a passthrough `api_request` node, with a node-level `response_mapping` (`data.` paths)
   and a last `always` transition. Run the date facts code again after it so `product_facts` holds per-product deadlines,
   floors and ids. Give the model ids from the tool result, never let it make one up.
+  For the account load use `blocks.account_load(load, tool, facts, facts_code, <next>, <fail node>, mapping=...)`: it
+  goes on only when the facts found a product, loads once more otherwise, then goes to the fail node (a conversation
+  node that says the brief's line for a service failure and closes with the brief's code for it). Seen in a practice
+  run (raw-a2 PUB-07): get_account never answered, the call went on, and the agent made up the product and the amount.
+  Never test the load node's own mapped variables in its transitions: they are not set yet when those are read.
 - **Model-called tools.** Description says exactly when to call it ("CALL it ... only after ..."). One tool per message.
   After every tool result the agent speaks or calls the next tool; it never ends a turn with nothing.
 - **Order of actions.** A tool whose result decides the outcome (a transfer, a write) is called alone and its result is

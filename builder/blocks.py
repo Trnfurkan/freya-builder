@@ -169,6 +169,25 @@ def api_node(name, tool, next_node, mapping=(), transitions=None):
     return _passthrough(name, "api_request", [tool], next_node, transitions, list(mapping) + list(inner or []))
 
 
+ACCOUNT_LOADED = "product_count"
+
+
+def account_load(load_name, tool, facts_name, facts_code, next_node, fail_node, *, mapping=(),
+                 count_var=ACCOUNT_LOADED):
+    """Loads the account and runs the facts code (date_facts.py), and goes on to next_node only when the facts found a
+    product (count_var > 0). Otherwise it loads and runs the facts once more, then goes to fail_node (the brief's
+    service-error ending). Seen in a practice run (raw-a2 PUB-07): get_account never answered, the call went on, and
+    the agent made up the product id and the amount. The test is on the facts node: on the load node itself the
+    mapped variables are not set yet when its transitions are read (seen in the call logs)."""
+    retry_load, retry_facts = load_name + "_retry", facts_name + "_retry"
+    # date_facts.py writes the count as a string ("0", "1"): compare it as one, never as a number.
+    loaded = go(next_node, "the account loaded: at least one product", all_of(is_set(count_var), ne(count_var, "0")))
+    return [api_node(load_name, tool, facts_name, mapping),
+            code_node(facts_name, facts_code, retry_load, transitions=[loaded]),
+            api_node(retry_load, tool, retry_facts, mapping),
+            code_node(retry_facts, facts_code, fail_node, transitions=[loaded])]
+
+
 def end_node(name, spoken=None, function_name=None):
     """Hangs up. With `spoken`, says that line first; otherwise silent (say goodbye in the node before).
     `function_name` becomes the call's endedReason."""

@@ -256,6 +256,23 @@ def check_close_marks_sent(wf, rep):
                                         "may not end before its answer comes back, and close_call goes out twice")
 
 
+def check_account_loaded(wf, rep):
+    """An account load (api_request node) followed by the facts code (date_facts.py) goes on only when the facts found
+    a product (blocks.account_load): in a practice run (raw-a2 PUB-07) get_account never answered and the agent made
+    up the product id and the amount."""
+    nodes = wf.get("nodes") or {}
+    for k, n in nodes.items():
+        if n.get("node_type") != "api_request":
+            continue
+        nxt = nodes.get(n.get("passthrough_default_transition")) or {}
+        if 'vars["promise_rules"]' not in json.dumps(nxt.get("pre_actions") or []).replace('\\"', '"'):
+            continue
+        if '"variable": "product_count"' not in json.dumps(nxt.get("transitions") or []):
+            rep.warn("nodes." + nxt.get("name", "?"), f"facts after the account load {k!r} go on without testing "
+                                                     "product_count: if the account does not load, the agent works "
+                                                     "with no products; use blocks.account_load")
+
+
 def check_close_with_notes(wf, rep):
     """A conversation node must not hold a note tool and the closing tool together: in practice runs close_call went
     out in the same message as add_note and the bank closed first (4 of 30 calls). Use blocks.ready_to_close into a
@@ -594,6 +611,7 @@ def validate(wf, spec=None, call_vars=None):
     check_settled_closing(wf, rep)
     check_close_with_notes(wf, rep)
     check_close_marks_sent(wf, rep)
+    check_account_loaded(wf, rep)
     check_speakable(wf, rep)
 
     if spec is not None:

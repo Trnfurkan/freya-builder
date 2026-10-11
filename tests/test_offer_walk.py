@@ -359,3 +359,25 @@ def test_validator_rejects_facts_in_the_records_node():
     wf["system_prompt"] = "Facts: {{date_facts}}"
     assert any("the system prompt shows ['date_facts']" in m for m in report(wf)[0])
     assert report(walk_workflow())[0] == []
+
+
+# --- fix20-a: closing tool recognised by its parameters; one-product records close after the promise --------------
+
+def test_only_the_closing_hook_counts_as_a_closing_tool():
+    from builder.validate import _is_closer
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    note = ot.api_tool(OPENAPI, "add_note", baked=CID, post_hook=snippets.post_result_code("Saved.", "Not saved."))
+    assert _is_closer(close) and not _is_closer(note)      # post_result.py's comments mention call_closed
+    assert "call_closed" in note["post_process_code"]
+
+
+def test_records_node_closes_after_the_promise_in_a_one_product_brief():
+    close = ot.api_tool(OPENAPI, "close_call", baked=CID, post_hook=b.close_post_hook(snippets))
+    promise = ot.api_tool(OPENAPI, "create_promise", baked=CID)
+    rec = b.records_node("records", [promise], "closing", close_after="create_promise")
+    conds = [json.dumps(t["condition"]) for t in rec["transitions"]]
+    assert all(t["target_node"] == "closing" for t in rec["transitions"])
+    assert "create_promise_response.data.ok" in conds[0] and "create_promise_failure_count" in conds[1]
+    assert rec["transitions"][-1]["is_tool_call"]
+    plain = b.records_node("records", [promise], "closing")
+    assert len(plain["transitions"]) == 1                     # several products: notes first, so no shortcut

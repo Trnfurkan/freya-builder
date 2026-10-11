@@ -393,13 +393,23 @@ RECORDS_TASK = ("No payment request is allowed any more and you never make one: 
                 "promise is recorded without a result with ok true.")
 
 
-def records_node(name, tools, closing_target, *, task=None, max_turns=20, max_turn_target=None):
+def records_node(name, tools, closing_target, *, task=None, max_turns=20, max_turn_target=None, close_after=""):
     """Where the walk ends (offer_walk done_target) and where the working node goes when nothing is left to ask
     (to_records): read-back, records and notes, then ready_to_close. It has no transition to any gate, request or
-    working node, so no path leads from here to a new payment request (the validator checks the graph)."""
+    working node, so no path leads from here to a new payment request (the validator checks the graph).
+    close_after: the promise tool's name, only for a brief with one product and no note rule. Then the call moves to
+    closing as soon as that tool answered ok true, or failed twice (the engine's own counter: after an HTTP error the
+    post-hook does not run). Seen in a practice run (fix20-a): without it the records node did not take the
+    transition to close after the promise and said goodbye until its turn cap."""
     task = task or RECORDS_TASK
+    transitions = []
+    if close_after:
+        transitions += [go(closing_target, f"{close_after} answered ok true: close the call",
+                           is_true(f"{close_after}_response.data.ok")),
+                        go(closing_target, f"{close_after} failed twice: close the call",
+                           gt(f"{close_after}_failure_count", 1))]
     return conversation(name, task, tools=list(tools), on_enter=llm("Speak now, in words: " + task),
-                        transitions=[ready_to_close(closing_target)], max_turns=max_turns,
+                        transitions=transitions + [ready_to_close(closing_target)], max_turns=max_turns,
                         max_turn_target=max_turn_target or closing_target)
 
 

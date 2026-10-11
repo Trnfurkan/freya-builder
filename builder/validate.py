@@ -200,6 +200,16 @@ def policy_in_workflow(wf):
     return None
 
 
+CLOSED_SET = '\\"set_on_success\\": \\u007b\\"call_closed\\": \\"yes\\"'
+
+
+def _is_closer(tool):
+    """The closing tool: its post-hook (blocks.close_post_hook) sets call_closed on success. Read from the hook's
+    PARAMS, not from any text: post_result.py's own comments mention call_closed (fix20-a: every tool with a result
+    hook was taken for a closing tool)."""
+    return CLOSED_SET in str(tool.get("post_process_code") or "")
+
+
 def _settled_flag(tool):
     """The flag a mark_product pre-hook raises when every product is settled, or ''."""
     m = re.search(r'\\"settled_flag\\": \\"(\w+)\\"', str(tool.get("pre_process_code") or ""))
@@ -220,7 +230,7 @@ def check_settled_closing(wf, rep):
             continue
         where = "nodes." + k
         closers = [t["function"]["name"] for t in tools
-                   if "call_closed" in str(t.get("post_process_code") or "") and t.get("function")]
+                   if _is_closer(t) and t.get("function")]
         if closers:
             rep.error(where, f"has the closing tool {closers[0]!r} next to tools that settle products: it can go out in "
                              "the same message as a note; close only in blocks.closing_node after settled_transition")
@@ -242,7 +252,7 @@ def check_close_with_notes(wf, rep):
     blocks.closing_node instead."""
     for k, n in (wf.get("nodes") or {}).items():
         tools = n.get("tools") or []
-        closers = [t for t in tools if "call_closed" in str(t.get("post_process_code") or "")]
+        closers = [t for t in tools if _is_closer(t)]
         if closers and any(_is_note_tool(t) for t in tools):
             rep.error("nodes." + k, "has a note tool and the closing tool together: close_call can go out in the same "
                                     "message as a note. Take the closing tool out, add blocks.ready_to_close(<closing>) "
@@ -381,7 +391,7 @@ def check_walk(wf, rep, every, gates, say_nodes):
         if shown:
             rep.error("workflow", f"the system prompt shows {shown} to every node, including the records node after the "
                                   "walk: keep facts in the working node's task only")
-    closers = {k for k, n, _ in every if any("call_closed" in str(x.get("post_process_code") or "")
+    closers = {k for k, n, _ in every if any(_is_closer(x)
                                              for x in n.get("tools") or [])}
     walk_feeding = [k for k in feeding if any(t.get("target_node") in walk_gates for t in nodes[k].get("transitions") or [])]
     for k in walk_feeding:

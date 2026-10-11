@@ -187,7 +187,11 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   node is not entered (fix18-ab: it was, and asked for the loans itself). Leave the records node's default task: it
   sees only `{{offer_summary}}` (product names, agreed amounts and dates, refused products). Never put
   `{{product_facts}}`, `{{date_facts}}` or other facts into the records node or the system prompt: the validator
-  rejects it (fix18-ab: with the facts the records node asked for the car loan's floor on its deadline). The gate goes through the
+  rejects it (fix18-ab: with the facts the records node asked for the car loan's floor on its deadline).
+  With one product and no note rule (Brief A style) give the records node `close_after="create_promise"`: it moves to
+  closing as soon as the promise answered ok true or failed twice (fix20-a: without it the records node said goodbye
+  until its turn cap and close_call came too late or never). With a note rule leave it out: the notes come first.
+  Never edit the snippets' comments to quiet the validator: it recognises the closing tool by its hook's parameters. The gate goes through the
   products by itself in get_account order: it counts every request before it is said, answers "accepted" and
   "refused" go back into the gate (never to the working node), it records an accepted request's amount and date, and
   moves on to the next open product. The working node is entered only for other answers and when the walk is done

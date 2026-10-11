@@ -1,0 +1,10 @@
+{
+  "team": "who_am_i",
+  "members": [{ "name": "Furkan Turan", "email": "furkanturan2604@gmail.com" }],
+  "repo": "https://github.com/Trnfurkan/freya-builder",
+  "commit": "cf6220d292d7cf6c7b2cad4125913d2638d80ae5",
+  "run_command": "python builder/build.py {case_folder} {mock_url}/voice/v1 --openapi mock/case/openapi.json --budget-min 95",
+  "workflow": "submission/final.workflow.json",
+  "trace": "traces/20261011-205559.txt",
+  "mock_url": "https://freya-bank-mock.furkanturan2604.workers.dev"
+}

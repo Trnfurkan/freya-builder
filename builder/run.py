@@ -43,15 +43,33 @@ def kit_path(p):
         return p.as_posix()
 
 
-def build_prompt(briefs, openapi, slot, practice, deadline, python, max_sims=2):
-    lines = [
-        f"Use the {SKILL} skill to build one phone agent.",
-        "Brief files, in order (a later file builds on and overrides the earlier ones): " + ", ".join(kit_path(b) for b in briefs),
+CASE_FOLDER = ("Case folder (the bank's documents): {folder}. Read README.md first (it says what each document is), "
+               "then BRIEF.md, then every other document in the folder: analysis, flow drawing, announcements, service "
+               "contract, test customers, questions and answers, example conversations. A later announcement or answer "
+               "overrides an earlier document; note in rules.md which one decided each rule. The agent speaks the "
+               "language the documents ask for (the documents' own language when they say nothing), and every sentence "
+               "they require is written word for word in that language. The example conversations and test customers "
+               "show behaviour; they add no rule the documents do not state. Test the agent with builder.chat_test using "
+               "the test customers' variables.")
+
+
+def build_prompt(briefs, openapi, slot, practice, deadline, python, max_sims=2, mock_url=""):
+    folders = [b for b in briefs if pathlib.Path(b).is_dir()]
+    files = [b for b in briefs if b not in folders]
+    lines = [f"Use the {SKILL} skill to build one phone agent."]
+    if files:
+        lines.append("Brief files, in order (a later file builds on and overrides the earlier ones): "
+                     + ", ".join(kit_path(b) for b in files))
+    lines += [CASE_FOLDER.format(folder=kit_path(f)) for f in folders]
+    lines += [
         f"Tool API file: {kit_path(openapi)}",
         f"Slot: {slot}  (work folder out/{slot}/, save with this slot only)",
         f"Python interpreter for every command: {python}",
         f"Hard deadline: {deadline:%H:%M:%S} local time. Finish, with the agent saved, before it.",
     ]
+    if mock_url:
+        lines.append(f"The bank's services: the team's mock at {mock_url} (set as FREYA_MOCK_URL; "
+                     "openapi_tools.base_url uses it). Never change a tool's address by hand.")
     if practice:
         lines.append(f"Practice customers exist for this brief: run them with `{python} -m builder.practice <agent_id> "
                      f"--brief {practice} --out results/{slot}-<n>.json` (same arguments as tools/run_cases.py). "
@@ -272,7 +290,7 @@ def sdk_version():
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("briefs", nargs="+")
+    ap.add_argument("briefs", nargs="+", help="brief files, or a case folder with the bank's documents")
     ap.add_argument("--openapi", default=str(KIT / "tools" / "openapi.json"))
     ap.add_argument("--slot", help="workflow slot; default: the last brief's file name")
     ap.add_argument("--practice", help="brief letter in public-test-set.json whose practice customers fit this brief")
@@ -281,6 +299,7 @@ def main(argv=None):
     ap.add_argument("--max-turns", type=int, default=200)
     ap.add_argument("--max-sims", type=int, default=2, help="practice simulations this build may start (enforced)")
     ap.add_argument("--export", action="store_true", help="after the build, export the workflow to submission/<slot>.workflow.json")
+    ap.add_argument("--mock-url", help="the team's mock of the bank's services; every tool calls it")
     ap.add_argument("--keep-host-env", action="store_true",
                     help="keep the variables of an enclosing Claude Code session (default: removed from this process)")
     args = ap.parse_args(argv)
@@ -289,8 +308,11 @@ def main(argv=None):
     stripped = [] if args.keep_host_env else builder_env.strip_host_session()
 
     for b in args.briefs + [args.openapi]:
-        if not pathlib.Path(b).is_file():
+        if not (pathlib.Path(b).is_file() or (b != args.openapi and pathlib.Path(b).is_dir())):
             sys.exit(f"not found: {b}")
+    if args.mock_url:
+        from builder.openapi_tools import MOCK_URL_VAR
+        os.environ[MOCK_URL_VAR] = args.mock_url.rstrip("/")
     missing = [v for v in ("FREYA_API_KEY", "FREYA_BANK_TEAM_KEY") if not os.environ.get(v)]
     if missing:
         sys.exit("missing environment variables: " + ", ".join(missing))
@@ -299,11 +321,13 @@ def main(argv=None):
     deadline = start + datetime.timedelta(minutes=args.budget_min)
     args.deadline = deadline
     args.prompt = build_prompt(args.briefs, args.openapi, args.slot, args.practice, deadline,
-                               pathlib.Path(sys.executable).as_posix(), args.max_sims if args.practice else 0)
+                               pathlib.Path(sys.executable).as_posix(), args.max_sims if args.practice else 0,
+                               mock_url=args.mock_url or "")
 
     stamp = start.strftime("%Y%m%d-%H%M%S")
     trace = Trace(KIT / "traces" / f"{stamp}.txt")
     trace.start(briefs=",".join(kit_path(b) for b in args.briefs), openapi=kit_path(args.openapi), slot=args.slot,
+                mock_url=args.mock_url or "-",
                 builder_model=args.model, budget_min=args.budget_min, max_sims=args.max_sims if args.practice else 0,
                 sdk=sdk_version())
     if loaded:

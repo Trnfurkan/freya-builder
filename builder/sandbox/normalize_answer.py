@@ -7,6 +7,7 @@
 # picks a value the customer did not say: a wrong answer stays wrong and the service rejects it.
 # A corrected answer ("12 July 1991, sorry, I mean 21 July 1992") counts by its last readable date: the latest exact
 # answer decides.
+# Turkish answers are read too (_turkish): month names, number words and correction words.
 # Rules for this file: only json, re and datetime; never raise; no double braces.
 #
 # PARAMS keys:
@@ -129,6 +130,78 @@ def _spoken_digits(nums):
     return s or None
 
 
+# Turkish answers ("14 Mart 1988", "on dort mart bin dokuz yuz seksen sekiz", "dort dort yedi bir") become the same
+# answer in digits and English month names before the rules above read them. Only for text that looks Turkish: "on"
+# is also an English word ("on 14 March").
+_TR_FOLD = dict(zip("\u00e7\u011f\u0131\u00f6\u015f\u00fc\u00c7\u011e\u0130\u00d6\u015e\u00dc\u00e2\u00ee\u00fb", "cgiosucgiosuaiu"))
+_TR_MONTHS = dict(ocak="january", subat="february", mart="march", nisan="april", mayis="may", haziran="june",
+                  temmuz="july", agustos="august", eylul="september", ekim="october", kasim="november",
+                  aralik="december")
+_TR_UNITS = dict(sifir=0, bir=1, iki=2, uc=3, dort=4, dord=4, bes=5, alti=6, yedi=7, sekiz=8, dokuz=9)
+_TR_TENS = dict(on=10, yirmi=20, otuz=30, kirk=40, elli=50, altmis=60, yetmis=70, seksen=80, doksan=90)
+_TR_SUFFIX = ("inci", "nci", "uncu", "ncu", "inde", "unde", "unda", "inda", "nde", "nda", "sinde", "sinda",
+              "sunda", "sunde", "incisi", "uncusu", "ncisi", "unu", "ini", "i", "u", "si", "su")
+_TR_SIGNS = set(_TR_MONTHS) | (set(_TR_UNITS) - set(["bir"])) | (set(_TR_TENS) - set(["on"])) | set(["yuz", "bin"])
+_TR_CORRECTION = re.compile(r"\b(?:pardon|yani|hayir|ozur dilerim|aslinda|duzeltiyorum|yanlis)\b")
+
+
+def _tr_word(w):
+    """(value, rank) of a Turkish number word, with an ordinal or case ending ("dordunde", "on besinci"), or None."""
+    for table, rank in ((_TR_UNITS, 1), (_TR_TENS, 10)):
+        if w in table:
+            return table[w], rank
+        for stem, v in table.items():
+            if w.startswith(stem) and w[len(stem):] in _TR_SUFFIX:
+                return v, rank
+    if w == "yuz":
+        return 100, 100
+    if w == "bin":
+        return 1000, 1000
+    return None
+
+
+def _turkish(text):
+    folded = "".join(_TR_FOLD.get(ch, ch) for ch in str(text)).lower()
+    words = re.findall(r"[a-z]+|\d+|[^a-z\d\s]", folded)
+    if not (set(words) & _TR_SIGNS or folded != str(text).lower()):
+        return text
+    out, cur = [], None          # cur: [total, part, last rank]
+    for w in words + [""]:
+        v = _tr_word(w)
+        if v is None:
+            if cur:
+                out.append(str(cur[0] + cur[1]))
+                cur = None
+            if w:
+                out.append(_TR_MONTHS.get(w, w))
+            continue
+        val, rank = v
+        if rank == 1000:
+            if cur and cur[2] < 1000:
+                cur = [cur[0] + (cur[1] or 1) * 1000, 0, 1000]
+            else:
+                if cur:
+                    out.append(str(cur[0] + cur[1]))
+                cur = [1000, 0, 1000]
+        elif rank == 100:
+            if cur and cur[2] == 1 and cur[1] < 10:
+                cur = [cur[0], cur[1] * 100, 100]
+            elif cur and cur[2] > 100:
+                cur = [cur[0], cur[1] + 100, 100]
+            else:
+                if cur:
+                    out.append(str(cur[0] + cur[1]))
+                cur = [0, 100, 100]
+        elif cur and cur[2] > rank:
+            cur = [cur[0], cur[1] + val, rank]
+        else:
+            if cur:
+                out.append(str(cur[0] + cur[1]))
+            cur = [0, val, rank]
+    text = " ".join(out)
+    return _TR_CORRECTION.sub(" sorry ", text)
+
+
 _CORRECTION = re.compile(r"\b(?:sorry|i mean|i meant|no wait|wait|actually|correction|rather|no,? it is|no,? it's)\b",
                          re.IGNORECASE)
 
@@ -203,7 +276,7 @@ def _ok(y, mo, d):
 def normalize(field, answer, p):
     if not isinstance(answer, (str, int, float)):
         return answer
-    text = str(answer).strip()
+    text = _turkish(str(answer).strip())
     if not text:
         return answer
     if p.get("all_dates") or (field is not None and str(field) in (p.get("date_fields") or [])):

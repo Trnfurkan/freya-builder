@@ -156,3 +156,33 @@ def test_error_summary_names_the_usage_limit():
     class Plain:
         subtype, is_error = "error_max_turns", True
     assert run.error_summary(Plain()) == "builder agent stopped with an error (error_max_turns)"
+
+
+def test_prompt_with_a_case_folder_and_a_mock(tmp_path):
+    case = tmp_path / "case"
+    case.mkdir()
+    p = run.build_prompt([case], run.KIT / "tools" / "openapi.json", "final-1", None,
+                         datetime.datetime(2026, 10, 11, 21, 0), "py", mock_url="https://m.example.workers.dev")
+    assert "Case folder" in p and case.as_posix() in p and "README.md first" in p and "Brief files" not in p
+    assert "https://m.example.workers.dev" in p and "FREYA_MOCK_URL" in p
+
+
+def test_mock_url_replaces_the_file_address(monkeypatch):
+    from builder import openapi_tools as ot
+    spec = {"servers": [{"url": "https://bank.example/v1/"}]}
+    monkeypatch.delenv(ot.MOCK_URL_VAR, raising=False)
+    assert ot.base_url(spec) == "https://bank.example/v1"
+    monkeypatch.setenv(ot.MOCK_URL_VAR, "https://m.example.workers.dev/")
+    assert ot.base_url(spec) == "https://m.example.workers.dev"
+
+
+def test_final_command_maps_to_builder_run(tmp_path):
+    from builder import build
+    case = tmp_path / "case"
+    case.mkdir()
+    args = build.to_run_args([str(case), "https://m.example.workers.dev/v1"])
+    assert args[:3] == [str(case), "--mock-url", "https://m.example.workers.dev/v1"]
+    assert "--export" in args and args[args.index("--slot") + 1] == "final"
+    assert args[args.index("--openapi") + 1].endswith("openapi.json")
+    own = build.to_run_args([str(case), "https://m.example.workers.dev/v1", "--slot", "final-2", "--budget-min", "80"])
+    assert own.count("--slot") == 1 and own[own.index("--slot") + 1] == "final-2" and own.count("--budget-min") == 1

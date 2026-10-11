@@ -4,6 +4,9 @@ Every URL, body field, type and enum comes from the file, so nothing is typed by
 Shapes follow docs/tools-and-code.md ("Tool function shape", "api_call body field rules").
 """
 import json
+import os
+
+MOCK_URL_VAR = "FREYA_MOCK_URL"
 
 
 def load(path):
@@ -12,7 +15,8 @@ def load(path):
 
 
 def base_url(spec):
-    return spec["servers"][0]["url"].rstrip("/")
+    """The bank's address: FREYA_MOCK_URL when set (the team's own mock, builder.run --mock-url), else the file's."""
+    return (os.environ.get(MOCK_URL_VAR) or spec["servers"][0]["url"]).rstrip("/")
 
 
 def tool_names(spec):

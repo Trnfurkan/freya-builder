@@ -139,6 +139,20 @@ Put rules where the model cannot skip them: code and routes first, tool-result i
   node that says the brief's line for a service failure and closes with the brief's code for it). Seen in a practice
   run (raw-a2 PUB-07): get_account never answered, the call went on, and the agent made up the product and the amount.
   Never test the load node's own mapped variables in its transitions: they are not set yet when those are read.
+- **Tool API shapes.** `openapi_tools.api_tool` takes the operation's own path and method (name = `operationId`),
+  path and query parameters, and nested request bodies: a nested field is a leaf named `parent__child` (bake it the
+  same way: `baked={"data__customerNo": "{{customerNumber}}"}`), and the tool's pre-hook puts it back into its object
+  before the request goes out. Never write a tool by hand to get a shape; build every tool with `api_tool`.
+- **Spoken numbers, dates and digits (Turkish).** The model must never turn a bank value into words itself. On every
+  bank tool whose answer has an amount, a date or card digits to read out, put `snippets.tr_speech_code({"fields":
+  [{"var": "say_<name>", "path": "data.<field>", "kind": "amount" | "amount_digits" | "date" | "digits" | "number",
+  "currency": "TL" | "USD" | "EUR" | "GBP"}], "units": {...the brief's own currency words...}})` in the tool's
+  `post_process_code`, chained before `post_result_code` (`snippets.chain`). It writes the spoken forms to new
+  variables and never changes the request or the answer, so the raw values still go to the bank as they came. Speak
+  them with fixed `tts` lines or `{{say_<name>}}` in the node's prompt, never the raw `{{...}}` number. A missing value
+  gives "" (a missing block is not zero): route or word the sentence on the raw value, read the spoken one. For values
+  already in variables, use it in a `code` node with `"source": "vars"`. Bank tools wait 20 s (`timeout_ms`), since an
+  answer can be slow and still succeed.
 - **Model-called tools.** Description says exactly when to call it ("CALL it ... only after ..."). One tool per message.
   After every tool result the agent speaks or calls the next tool; it never ends a turn with nothing.
 - **Order of actions.** A tool whose result decides the outcome (a transfer, a write) is called alone and its result is

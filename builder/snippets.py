@@ -65,6 +65,13 @@ def mark_product_code(params):
     return build("mark_product", params)
 
 
+def tr_speech_code(params):
+    """post_process_code for a bank tool (or code for a `code` node with source "vars"): Turkish speech forms of
+    amounts, dates and digits written to new variables (sandbox/tr_speech.py). Reads only; the request and the
+    answer stay as the bank sent them. Chain it before post_result_code on the same tool."""
+    return build("tr_speech", params)
+
+
 def chain(*codes):
     """Several hook snippets run one after another in one pre_process_code (a tool has only one).
     Each snippet sets its own PARAMS first, so they do not interfere."""

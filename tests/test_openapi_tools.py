@@ -21,7 +21,7 @@ def test_verify_identity_tool(openapi):
     assert "One of: date_of_birth, phone_last4." in body["properties"]["field"]["description"]
     assert body["properties"]["answer"]["default"] == "{{answer}}"
     assert body["required"] == ["field", "answer"]
-    assert t["config"] == {"timeoutMs": 12000, "maxRetries": 0}
+    assert t["config"] == {"timeoutMs": 20000, "maxRetries": 0}
 
 
 def test_close_call_keeps_all_outcomes_and_can_narrow(openapi):

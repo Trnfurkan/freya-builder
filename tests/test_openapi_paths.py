@@ -79,3 +79,46 @@ def test_validator_accepts_operation_paths():
         b.end_node("end")])
     rep = validate(wf, SPEC)
     assert not [i for i in rep.errors if "url" in i[2] or "not in the tool API" in i[2]], rep.text()
+
+
+NESTED = {
+    "servers": [{"url": "https://bank.example"}],
+    "paths": {"/svc/v1/things.list": {"post": {
+        "operationId": "things.list",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["data"],
+            "properties": {
+                "data": {"type": "object", "required": ["ownerNo"], "properties": {
+                    "ownerNo": {"type": "string"}, "flow": {"type": "string", "enum": ["A", "B"]}}},
+                "call": {"type": "object", "properties": {"callId": {"type": "string"}}}}}}}},
+        "responses": {"200": {"description": "ok"}}}}},
+}
+
+
+def test_nested_body_fields_become_leaves_and_go_back_into_objects():
+    props, required = ot.body_schema(NESTED, "things.list")
+    assert set(props) == {"data__ownerNo", "data__flow", "call__callId"} and required == ["data__ownerNo"]
+    t = ot.api_tool(NESTED, "things.list", baked={"data__ownerNo": "{{customerNumber}}", "data__flow": "A",
+                                                   "call__callId": "{{call_id}}"})
+    leaves = t["function"]["parameters"]["properties"]["body"]["properties"]
+    assert leaves["data__ownerNo"]["default"] == "{{customerNumber}}" and leaves["data__flow"]["enum"] == ["A", "B"]
+    assert t["function"]["parameters"]["properties"]["url"]["default"] == "https://bank.example/svc/v1/things.list"
+    code = t["pre_process_code"]
+    assert "{{" not in code
+    out = snippets.run_pre_hook(code, {"data__ownerNo": "12345678", "data__flow": "A", "call__callId": "c1"})
+    assert out == {"data": {"ownerNo": "12345678", "flow": "A"}, "call": {"callId": "c1"}}
+
+
+def test_nested_body_runs_after_the_callers_hook():
+    first = "try:\n    config['body']['data__ownerNo'] = str(config['body']['data__ownerNo']).strip()\nexcept Exception:\n    pass\n"
+    t = ot.api_tool(NESTED, "things.list", pre_hook=first)
+    assert t["pre_process_code"].startswith(first)
+    out = snippets.run_pre_hook(t["pre_process_code"], {"data__ownerNo": " 1 ", "data__flow": "B"})
+    assert out == {"data": {"ownerNo": "1", "flow": "B"}}
+
+
+def test_validator_accepts_nested_leaves():
+    t = ot.api_tool(NESTED, "things.list", baked={"data__ownerNo": "{{customerNumber}}"})
+    wf = b.workflow("talk", [b.conversation("talk", "Help.", tools=[t], transitions=[b.go("end", "done", b.eq("x", "y"))],
+                                            max_turns=5, max_turn_target="end"), b.end_node("end")])
+    rep = validate(wf, NESTED)
+    assert not [i for i in rep.errors if "things.list" in i[2] or "body" in i[2] or "url" in i[2]], rep.text()

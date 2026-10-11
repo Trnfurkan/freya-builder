@@ -1,0 +1,1152 @@
+{
+ "openapi": "3.0.3",
+ "info": {
+  "title": "Freya Bank voice statement services (team mock)",
+  "version": "1"
+ },
+ "servers": [
+  {
+   "url": "https://freya-bank-mock.furkanturan2604.workers.dev/voice/v1"
+  }
+ ],
+ "paths": {
+  "/cards.list": {
+   "post": {
+    "operationId": "cards_list",
+    "summary": "The customer's cards the assistant may talk about.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "data"
+        ],
+        "properties": {
+         "data": {
+          "type": "object",
+          "required": [
+           "customerNo",
+           "aiFlow"
+          ],
+          "properties": {
+           "customerNo": {
+            "type": "string",
+            "description": "The customer number of the call."
+           },
+           "aiFlow": {
+            "type": "string",
+            "enum": [
+             "CardOps"
+            ]
+           }
+          }
+         },
+         "call": {
+          "type": "object",
+          "properties": {
+           "ani": {
+            "type": "string"
+           },
+           "lang": {
+            "type": "string",
+            "enum": [
+             "tr"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Success: result.returnCode \"1\".",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "data": {
+           "type": "object",
+           "properties": {
+            "cards": {
+             "type": "array",
+             "items": {
+              "type": "object",
+              "properties": {
+               "cardNumber": {
+                "type": "string"
+               },
+               "cardNumberLast4": {
+                "type": "string"
+               },
+               "productName": {
+                "type": "string"
+               },
+               "status": {
+                "type": "string"
+               },
+               "isMainCard": {
+                "type": "boolean"
+               }
+              }
+             }
+            },
+            "validCardsCount": {
+             "type": "number"
+            },
+            "exitState": {
+             "type": "string"
+            }
+           }
+          },
+          "result": {
+           "type": "object",
+           "properties": {
+            "guid": {
+             "type": "string"
+            },
+            "returnCode": {
+             "type": "string"
+            },
+            "messageText": {
+             "type": "string"
+            },
+            "code": {
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "type": {
+             "type": "string"
+            },
+            "details": {
+             "type": "object",
+             "properties": {
+              "guid": {
+               "type": "string"
+              },
+              "rootCause": {
+               "type": "string"
+              },
+              "errorOrigin": {
+               "type": "string"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "INVALID_ARGUMENTS_ERROR: a required field is missing or empty. Only result, no data."
+     },
+     "500": {
+      "description": "FBE00099: technical error on the bank's side. Only result, no data."
+     },
+     "404": {
+      "description": "FB_IVR_CHANNEL_102 (WARNING): Müşteriye ait geçerli kart bilgisi bulunamadı. Only result, no data."
+     }
+    }
+   }
+  },
+  "/cards.balance": {
+   "post": {
+    "operationId": "cards_balance",
+    "summary": "Statement and due dates, debt per currency, for one card.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "data"
+        ],
+        "properties": {
+         "data": {
+          "type": "object",
+          "required": [
+           "cardNumber"
+          ],
+          "properties": {
+           "cardNumber": {
+            "type": "string",
+            "description": "cardNumber exactly as cards_list returned it."
+           }
+          }
+         },
+         "call": {
+          "type": "object",
+          "properties": {
+           "ani": {
+            "type": "string"
+           },
+           "lang": {
+            "type": "string",
+            "enum": [
+             "tr"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Success: result.returnCode \"1\".",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "data": {
+           "type": "object",
+           "properties": {
+            "cardNumber": {
+             "type": "string"
+            },
+            "cardNumberLast4": {
+             "type": "string"
+            },
+            "productName": {
+             "type": "string"
+            },
+            "statementDate": {
+             "type": "string"
+            },
+            "lastPayDate": {
+             "type": "string"
+            },
+            "nextStatementDate": {
+             "type": "string"
+            },
+            "nextLastPayDate": {
+             "type": "string"
+            },
+            "debtTL": {
+             "type": "object",
+             "properties": {
+              "statementPaymentStatus": {
+               "type": "string"
+              },
+              "transferAmount": {
+               "type": "number"
+              },
+              "statementDebt": {
+               "type": "number"
+              },
+              "minPayment": {
+               "type": "number"
+              },
+              "remainingDebt": {
+               "type": "number"
+              },
+              "remainingMinPayment": {
+               "type": "number"
+              },
+              "currentPeriodExpense": {
+               "type": "number"
+              },
+              "totalDebt": {
+               "type": "number"
+              },
+              "totalDebtPaymentStatus": {
+               "type": "string"
+              },
+              "remainAutomaticPaymentAmount": {
+               "type": "number"
+              }
+             }
+            },
+            "debtUSD": {
+             "type": "object",
+             "properties": {
+              "statementPaymentStatus": {
+               "type": "string"
+              },
+              "transferAmount": {
+               "type": "number"
+              },
+              "statementDebt": {
+               "type": "number"
+              },
+              "minPayment": {
+               "type": "number"
+              },
+              "remainingDebt": {
+               "type": "number"
+              },
+              "remainingMinPayment": {
+               "type": "number"
+              },
+              "currentPeriodExpense": {
+               "type": "number"
+              },
+              "totalDebt": {
+               "type": "number"
+              },
+              "totalDebtPaymentStatus": {
+               "type": "string"
+              },
+              "remainAutomaticPaymentAmount": {
+               "type": "number"
+              }
+             }
+            },
+            "debtEUR": {
+             "type": "object",
+             "properties": {
+              "statementPaymentStatus": {
+               "type": "string"
+              },
+              "transferAmount": {
+               "type": "number"
+              },
+              "statementDebt": {
+               "type": "number"
+              },
+              "minPayment": {
+               "type": "number"
+              },
+              "remainingDebt": {
+               "type": "number"
+              },
+              "remainingMinPayment": {
+               "type": "number"
+              },
+              "currentPeriodExpense": {
+               "type": "number"
+              },
+              "totalDebt": {
+               "type": "number"
+              },
+              "totalDebtPaymentStatus": {
+               "type": "string"
+              },
+              "remainAutomaticPaymentAmount": {
+               "type": "number"
+              }
+             }
+            },
+            "debtGBP": {
+             "type": "object",
+             "properties": {
+              "statementPaymentStatus": {
+               "type": "string"
+              },
+              "transferAmount": {
+               "type": "number"
+              },
+              "statementDebt": {
+               "type": "number"
+              },
+              "minPayment": {
+               "type": "number"
+              },
+              "remainingDebt": {
+               "type": "number"
+              },
+              "remainingMinPayment": {
+               "type": "number"
+              },
+              "currentPeriodExpense": {
+               "type": "number"
+              },
+              "totalDebt": {
+               "type": "number"
+              },
+              "totalDebtPaymentStatus": {
+               "type": "string"
+              },
+              "remainAutomaticPaymentAmount": {
+               "type": "number"
+              }
+             }
+            },
+            "statementPaymentStatus": {
+             "type": "string"
+            },
+            "totalDebtPaymentStatus": {
+             "type": "string"
+            },
+            "automaticPaymentFlag": {
+             "type": "string"
+            }
+           }
+          },
+          "result": {
+           "type": "object",
+           "properties": {
+            "guid": {
+             "type": "string"
+            },
+            "returnCode": {
+             "type": "string"
+            },
+            "messageText": {
+             "type": "string"
+            },
+            "code": {
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "type": {
+             "type": "string"
+            },
+            "details": {
+             "type": "object",
+             "properties": {
+              "guid": {
+               "type": "string"
+              },
+              "rootCause": {
+               "type": "string"
+              },
+              "errorOrigin": {
+               "type": "string"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "INVALID_ARGUMENTS_ERROR: a required field is missing or empty. Only result, no data."
+     },
+     "500": {
+      "description": "FBE00099: technical error on the bank's side. Only result, no data."
+     },
+     "404": {
+      "description": "FB_IVR_CHANNEL_120 (WARNING): Kart bakiye servisi hatası: kart bulunamadı Only result, no data."
+     }
+    }
+   }
+  },
+  "/statement.week.get": {
+   "post": {
+    "operationId": "statement_week_get",
+    "summary": "The card's current statement week and day, joint statement info.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "data"
+        ],
+        "properties": {
+         "data": {
+          "type": "object",
+          "required": [
+           "cardNumber"
+          ],
+          "properties": {
+           "cardNumber": {
+            "type": "string",
+            "description": "cardNumber exactly as cards_list returned it."
+           }
+          }
+         },
+         "call": {
+          "type": "object",
+          "properties": {
+           "ani": {
+            "type": "string"
+           },
+           "lang": {
+            "type": "string",
+            "enum": [
+             "tr"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Success: result.returnCode \"1\".",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "data": {
+           "type": "object",
+           "properties": {
+            "cardNumber": {
+             "type": "string"
+            },
+            "cardNumberLast4": {
+             "type": "string"
+            },
+            "productName": {
+             "type": "string"
+            },
+            "statementWeek": {
+             "type": "number"
+            },
+            "statementDay": {
+             "type": "number"
+            },
+            "statementDate": {
+             "type": "string"
+            },
+            "lastPayDate": {
+             "type": "string"
+            },
+            "nextStatementDate": {
+             "type": "string"
+            },
+            "nextLastPayDate": {
+             "type": "string"
+            },
+            "relationType": {
+             "type": "string"
+            },
+            "relatedCardNumber": {
+             "type": "string"
+            },
+            "relatedCardProductName": {
+             "type": "string"
+            }
+           }
+          },
+          "result": {
+           "type": "object",
+           "properties": {
+            "guid": {
+             "type": "string"
+            },
+            "returnCode": {
+             "type": "string"
+            },
+            "messageText": {
+             "type": "string"
+            },
+            "code": {
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "type": {
+             "type": "string"
+            },
+            "details": {
+             "type": "object",
+             "properties": {
+              "guid": {
+               "type": "string"
+              },
+              "rootCause": {
+               "type": "string"
+              },
+              "errorOrigin": {
+               "type": "string"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "INVALID_ARGUMENTS_ERROR: a required field is missing or empty. Only result, no data."
+     },
+     "500": {
+      "description": "FBE00099: technical error on the bank's side. Only result, no data."
+     },
+     "404": {
+      "description": "FB_IVR_CHANNEL_121 (WARNING): Kart bulunamadı Only result, no data."
+     }
+    }
+   }
+  },
+  "/statement.week.decide": {
+   "post": {
+    "operationId": "statement_week_decide",
+    "summary": "Preview: the dates the card would get with the requested week. Changes nothing.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "data"
+        ],
+        "properties": {
+         "data": {
+          "type": "object",
+          "required": [
+           "cardNumber",
+           "newStatementWeek",
+           "statementDay"
+          ],
+          "properties": {
+           "cardNumber": {
+            "type": "string",
+            "description": "cardNumber exactly as cards_list returned it."
+           },
+           "newStatementWeek": {
+            "type": "string",
+            "enum": [
+             "1",
+             "2",
+             "3",
+             "4"
+            ]
+           },
+           "statementDay": {
+            "type": "string",
+            "description": "The card's current statementDay from statement_week_get."
+           }
+          }
+         },
+         "call": {
+          "type": "object",
+          "properties": {
+           "ani": {
+            "type": "string"
+           },
+           "lang": {
+            "type": "string",
+            "enum": [
+             "tr"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Success: result.returnCode \"1\".",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "data": {
+           "type": "object",
+           "properties": {
+            "statementDate": {
+             "type": "string"
+            },
+            "statementDueDate": {
+             "type": "string"
+            },
+            "statementDay": {
+             "type": "number"
+            },
+            "responseCode": {
+             "type": "number"
+            },
+            "responseMessage": {
+             "type": "string"
+            }
+           }
+          },
+          "result": {
+           "type": "object",
+           "properties": {
+            "guid": {
+             "type": "string"
+            },
+            "returnCode": {
+             "type": "string"
+            },
+            "messageText": {
+             "type": "string"
+            },
+            "code": {
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "type": {
+             "type": "string"
+            },
+            "details": {
+             "type": "object",
+             "properties": {
+              "guid": {
+               "type": "string"
+              },
+              "rootCause": {
+               "type": "string"
+              },
+              "errorOrigin": {
+               "type": "string"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "INVALID_ARGUMENTS_ERROR: a required field is missing or empty. Only result, no data."
+     },
+     "500": {
+      "description": "FBE00099: technical error on the bank's side. Only result, no data."
+     }
+    }
+   }
+  },
+  "/statement.week.change": {
+   "post": {
+    "operationId": "statement_week_change",
+    "summary": "Changes the card's statement week. Only after the caller agreed to the previewed dates.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "data"
+        ],
+        "properties": {
+         "data": {
+          "type": "object",
+          "required": [
+           "cardNumber",
+           "newStatementWeek",
+           "statementDay"
+          ],
+          "properties": {
+           "cardNumber": {
+            "type": "string",
+            "description": "cardNumber exactly as cards_list returned it."
+           },
+           "newStatementWeek": {
+            "type": "string",
+            "enum": [
+             "1",
+             "2",
+             "3",
+             "4"
+            ]
+           },
+           "statementDay": {
+            "type": "string",
+            "description": "The card's current statementDay from statement_week_get."
+           }
+          }
+         },
+         "call": {
+          "type": "object",
+          "properties": {
+           "ani": {
+            "type": "string"
+           },
+           "lang": {
+            "type": "string",
+            "enum": [
+             "tr"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Success: result.returnCode \"1\".",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "data": {
+           "type": "object",
+           "properties": {
+            "responseCode": {
+             "type": "number"
+            },
+            "responseMessage": {
+             "type": "string"
+            },
+            "statementWeek": {
+             "type": "string"
+            },
+            "statementDay": {
+             "type": "string"
+            },
+            "exitState": {
+             "type": "string"
+            }
+           }
+          },
+          "result": {
+           "type": "object",
+           "properties": {
+            "guid": {
+             "type": "string"
+            },
+            "returnCode": {
+             "type": "string"
+            },
+            "messageText": {
+             "type": "string"
+            },
+            "code": {
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "type": {
+             "type": "string"
+            },
+            "details": {
+             "type": "object",
+             "properties": {
+              "guid": {
+               "type": "string"
+              },
+              "rootCause": {
+               "type": "string"
+              },
+              "errorOrigin": {
+               "type": "string"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "INVALID_ARGUMENTS_ERROR: a required field is missing or empty. Only result, no data."
+     },
+     "500": {
+      "description": "FBE00099: technical error on the bank's side. Only result, no data."
+     }
+    }
+   }
+  },
+  "/contact.email.get": {
+   "post": {
+    "operationId": "contact_email_get",
+    "summary": "Registered e-mail / phone of the customer.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "data"
+        ],
+        "properties": {
+         "data": {
+          "type": "object",
+          "required": [
+           "customerNo",
+           "intAddressInfoType"
+          ],
+          "properties": {
+           "customerNo": {
+            "type": "string",
+            "description": "The customer number of the call."
+           },
+           "intAddressInfoType": {
+            "type": "string",
+            "enum": [
+             "E",
+             "P",
+             "B"
+            ]
+           }
+          }
+         },
+         "call": {
+          "type": "object",
+          "properties": {
+           "ani": {
+            "type": "string"
+           },
+           "lang": {
+            "type": "string",
+            "enum": [
+             "tr"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Success: result.returnCode \"1\".",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "data": {
+           "type": "object",
+           "properties": {
+            "communicationType": {
+             "type": "string"
+            },
+            "ibanCountryCode": {
+             "type": "string"
+            },
+            "ibanAreaCode": {
+             "type": "string"
+            },
+            "ibanPhoneNum": {
+             "type": "string"
+            },
+            "ibanEmail": {
+             "type": "string"
+            },
+            "ttsEmail": {
+             "type": "string"
+            },
+            "commGramType": {
+             "type": "string"
+            },
+            "exitState": {
+             "type": "string"
+            }
+           }
+          },
+          "result": {
+           "type": "object",
+           "properties": {
+            "guid": {
+             "type": "string"
+            },
+            "returnCode": {
+             "type": "string"
+            },
+            "messageText": {
+             "type": "string"
+            },
+            "code": {
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "type": {
+             "type": "string"
+            },
+            "details": {
+             "type": "object",
+             "properties": {
+              "guid": {
+               "type": "string"
+              },
+              "rootCause": {
+               "type": "string"
+              },
+              "errorOrigin": {
+               "type": "string"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "INVALID_ARGUMENTS_ERROR: a required field is missing or empty. Only result, no data."
+     },
+     "500": {
+      "description": "FBE00099: technical error on the bank's side. Only result, no data."
+     }
+    }
+   }
+  },
+  "/statement.pdf.send": {
+   "post": {
+    "operationId": "statement_pdf_send",
+    "summary": "Sends the issued statement PDF by e-mail.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "data"
+        ],
+        "properties": {
+         "data": {
+          "type": "object",
+          "required": [
+           "customerNo",
+           "cardNumber",
+           "currencyType",
+           "statementDate",
+           "emailAddress"
+          ],
+          "properties": {
+           "customerNo": {
+            "type": "string",
+            "description": "The customer number of the call."
+           },
+           "cardNumber": {
+            "type": "string",
+            "description": "cardNumber exactly as cards_list returned it."
+           },
+           "currencyType": {
+            "type": "string",
+            "enum": [
+             "TL",
+             "USD",
+             "EUR",
+             "GBP"
+            ]
+           },
+           "statementDate": {
+            "type": "string",
+            "description": "statementDate from cards_balance, dd.MM.yyyy."
+           },
+           "emailAddress": {
+            "type": "string",
+            "description": "The registered address (ibanEmail of contact_email_get)."
+           }
+          }
+         },
+         "call": {
+          "type": "object",
+          "properties": {
+           "ani": {
+            "type": "string"
+           },
+           "lang": {
+            "type": "string",
+            "enum": [
+             "tr"
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Success: result.returnCode \"1\".",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "data": {
+           "type": "object",
+           "properties": {
+            "exitState": {
+             "type": "string"
+            }
+           }
+          },
+          "result": {
+           "type": "object",
+           "properties": {
+            "guid": {
+             "type": "string"
+            },
+            "returnCode": {
+             "type": "string"
+            },
+            "messageText": {
+             "type": "string"
+            },
+            "code": {
+             "type": "string"
+            },
+            "message": {
+             "type": "string"
+            },
+            "type": {
+             "type": "string"
+            },
+            "details": {
+             "type": "object",
+             "properties": {
+              "guid": {
+               "type": "string"
+              },
+              "rootCause": {
+               "type": "string"
+              },
+              "errorOrigin": {
+               "type": "string"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "INVALID_ARGUMENTS_ERROR: a required field is missing or empty. Only result, no data."
+     },
+     "500": {
+      "description": "FBE00099: technical error on the bank's side. Only result, no data."
+     },
+     "404": {
+      "description": "FB_IVR_CHANNEL_107 (WARNING): Pdf dokümanı bulunamadı Only result, no data."
+     }
+    }
+   }
+  }
+ }
+}

@@ -92,14 +92,55 @@ except Exception:
 """
 
 
+NEST_HOOK = """
+# nested body (openapi_tools.NEST_HOOK): leaves named parent__child go back into their objects
+try:
+    _nb = config.get("body") if isinstance(config.get("body"), dict) else dict()
+    for _key in [k for k in list(_nb) if "__" in k]:
+        _val = _nb.pop(_key)
+        _parts = _key.split("__")
+        _cur = _nb
+        for _p in _parts[:-1]:
+            if not isinstance(_cur.get(_p), dict):
+                _cur[_p] = dict()
+            _cur = _cur[_p]
+        _cur[_parts[-1]] = _val
+    config["body"] = _nb
+except Exception:
+    pass
+"""
+
+
 def url_params_hook(names):
     return "import json\n" + URL_PARAMS_HOOK % json.dumps(json.dumps(list(names)))
+
+
+NEST = "__"
+
+
+def _flatten(props, required, prefix=""):
+    """Nested object fields become leaves named parent__child: the engine fills leaves under body.properties only.
+    NEST_HOOK puts them back into their objects before the request goes out."""
+    out, req = dict(), []
+    for k, v in props.items():
+        key = prefix + k
+        if isinstance(v, dict) and v.get("type", "object") == "object" and isinstance(v.get("properties"), dict) \
+                and v["properties"]:
+            sub, sub_req = _flatten(v["properties"], v.get("required") or [], key + NEST)
+            out.update(sub)
+            if k in required:
+                req += sub_req
+        else:
+            out[key] = v
+            if k in required:
+                req.append(key)
+    return out, req
 
 
 def body_schema(spec, name):
     _, op = operation(spec, name)
     schema = op.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema", {})
-    props, required = dict(schema.get("properties", {})), list(schema.get("required", []))
+    props, required = _flatten(schema.get("properties", {}), list(schema.get("required", [])))
     for k, v in url_params(spec, name).items():   # path and query parameters are filled like body fields
         props[k] = {f: x for f, x in v.items() if not f.startswith("_")}
         if v["_required"] and k not in required:
@@ -113,7 +154,7 @@ def response_fields(spec, name):
     return ok.get("content", {}).get("application/json", {}).get("schema", {}).get("properties", {})
 
 
-def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeout_ms=12000, max_retries=0,
+def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeout_ms=20000, max_retries=0,
              pre_hook="", post_hook="", response_mapping=None, enums=None, helper_fields=None):
     """One api_call tool.
 
@@ -185,6 +226,8 @@ def api_tool(spec, name, *, baked=None, descriptions=None, description="", timeo
     params = list(url_params(spec, name))
     if params:   # after the caller's own hook, which may still read or fix these fields
         tool["pre_process_code"] = (pre_hook + "\n" if pre_hook else "") + url_params_hook(params)
+    if any(NEST in k for k in props):   # last: every other hook sees the flat leaves
+        tool["pre_process_code"] = (tool.get("pre_process_code", "") + "\n" + NEST_HOOK).lstrip("\n")
     return tool
 
 
